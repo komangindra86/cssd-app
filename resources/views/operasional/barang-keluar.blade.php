@@ -5,18 +5,18 @@
 @section('content')
     <div class="p-6">
         <div class="mb-6">
-            <h1 class="text-2xl font-bold text-slate-800">Barang Keluar</h1>
+            <h1 class="text-2xl font-bold text-slate-800">Pendistribusian BMHP Reuse</h1>
             <p class="mt-1 text-sm text-slate-500">Catat serah-terima alat READY dari CSSD ke ruangan.</p>
         </div>
 
         <div class="mb-6 rounded border border-slate-200 bg-white">
             <div class="grid grid-cols-1 gap-4 p-6 lg:grid-cols-3">
                 <div>
-                    <label class="mb-2 block text-sm font-medium text-slate-700">Tanggal Keluar</label>
+                    <label class="mb-2 block text-sm font-medium text-slate-700">Tanggal Distribusi</label>
                     <input type="date" id="tanggalkeluar" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
                 </div>
                 <div>
-                    <label class="mb-2 block text-sm font-medium text-slate-700">Jam Keluar</label>
+                    <label class="mb-2 block text-sm font-medium text-slate-700">Jam Distribusi</label>
                     <input type="time" id="jamkeluar" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
                 </div>
                 <div>
@@ -25,7 +25,7 @@
                     <datalist id="listsectionpengguna"></datalist>
                 </div>
                 <div>
-                    <label class="mb-2 block text-sm font-medium text-slate-700">Petugas CSSD Yang Mengeluarkan</label>
+                    <label class="mb-2 block text-sm font-medium text-slate-700">Petugas CSSD Yang Mendistribusikan</label>
                     <input type="text" id="petugas" list="listpegawai" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
                     <datalist id="listpegawai"></datalist>
                 </div>
@@ -56,7 +56,7 @@
                                 <th class="border border-slate-200 p-2">Nama Alat</th>
                                 <th class="border border-slate-200 p-2">Reuse</th>
                                 <th class="border border-slate-200 p-2">Max Reuse</th>
-                                <th class="border border-slate-200 p-2">Ruangan Terakhir</th>
+                                <th class="border border-slate-200 p-2">Ruangan</th>
                             </tr>
                         </thead>
                         <tbody></tbody>

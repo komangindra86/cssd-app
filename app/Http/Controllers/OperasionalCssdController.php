@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -90,12 +91,27 @@ class OperasionalCssdController extends Controller
 
     public function itemData(Request $request)
     {
+        $penerimaanTerakhir = DB::table('cssd_masuk_logs')
+            ->select(
+                'cssd_item_id',
+                DB::raw('MAX(tanggal_masuk) as tanggal_penerimaan')
+            )
+            ->groupBy('cssd_item_id');
+
         $items = DB::table('cssd_items')
             ->join('master_bmhp', 'cssd_items.bmhp_id', '=', 'master_bmhp.id')
+            ->leftJoinSub($penerimaanTerakhir, 'penerimaan_terakhir', function ($join) {
+                $join->on(
+                    'penerimaan_terakhir.cssd_item_id',
+                    '=',
+                    'cssd_items.id'
+                );
+            })
             ->select(
                 'cssd_items.*',
                 'master_bmhp.nama as nama_bmhp',
-                'master_bmhp.max_reuse'
+                'master_bmhp.max_reuse',
+                'penerimaan_terakhir.tanggal_penerimaan'
             );
         $totalQuery = DB::table('cssd_items')->join(
             'master_bmhp',
@@ -141,6 +157,11 @@ class OperasionalCssdController extends Controller
                     ->orWhere('cssd_items.status', 'like', '%' . $search . '%')
                     ->orWhere(
                         'cssd_items.last_unit',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'penerimaan_terakhir.tanggal_penerimaan',
                         'like',
                         '%' . $search . '%'
                     );
@@ -238,9 +259,15 @@ class OperasionalCssdController extends Controller
                 'nullable',
                 Rule::in(['DTT', 'Plasma', 'Steam']),
             ],
+            'tanggal_steril' => 'nullable|date',
+            'masa_expire_bulan' => [
+                'nullable',
+                Rule::in([1, 3, 6, 12]),
+            ],
             'tanggal_penggunaan' => 'nullable|date',
             'nama_section_pengguna' => 'nullable|string|max:255',
             'no_rm' => 'nullable|string|max:100',
+            'nama_pasien' => 'nullable|string|max:255',
             'nama_dpjp' => 'nullable|string|max:255',
             'nama_perawat' => 'nullable|string|max:255',
             'petugas_penerima_pencucian' => 'required|string|max:255',
@@ -285,6 +312,7 @@ class OperasionalCssdController extends Controller
                 'tanggal_penggunaan' => 'required|date',
                 'nama_section_pengguna' => 'required|string|max:255',
                 'no_rm' => 'required|string|max:100',
+                'nama_pasien' => 'required|string|max:255',
                 'nama_dpjp' => 'required|string|max:255',
                 'nama_perawat' => 'required|string|max:255',
             ]);
@@ -295,6 +323,7 @@ class OperasionalCssdController extends Controller
                 'tanggal_penggunaan' => $request->tanggal_penggunaan,
                 'nama_section_pengguna' => $request->nama_section_pengguna,
                 'no_rm' => $request->no_rm,
+                'nama_pasien' => $request->nama_pasien,
                 'nama_dpjp' => $request->nama_dpjp,
                 'nama_perawat' => $request->nama_perawat,
                 'petugas' => $petugasPenerimaPencucian,
@@ -383,6 +412,26 @@ class OperasionalCssdController extends Controller
             );
         }
 
+        if (!$request->tanggal_steril) {
+            return response()->json(
+                [
+                    'message' =>
+                        'Tanggal melakukan sterilisasi wajib diisi.',
+                ],
+                422
+            );
+        }
+
+        if (!$request->masa_expire_bulan) {
+            return response()->json(
+                [
+                    'message' =>
+                        'Masa expire steril wajib dipilih.',
+                ],
+                422
+            );
+        }
+
         if (!$petugasPengemasan || !$petugasSterilisasi) {
             return response()->json(
                 [
@@ -392,6 +441,10 @@ class OperasionalCssdController extends Controller
                 422
             );
         }
+
+        $tanggalExpireSteril = Carbon::parse($request->tanggal_steril)
+            ->addMonthsNoOverflow((int) $request->masa_expire_bulan)
+            ->toDateString();
 
         DB::table('cssd_masuk_logs')->insert([
             'cssd_item_id' => $request->cssd_item_id,
@@ -417,6 +470,8 @@ class OperasionalCssdController extends Controller
             ->update([
                 'status' => 'READY',
                 'reuse_ke' => $reuseBaru,
+                'tanggal_steril_terakhir' => $request->tanggal_steril,
+                'tanggal_expire_steril' => $tanggalExpireSteril,
                 'updated_at' => now(),
             ]);
 
@@ -424,7 +479,9 @@ class OperasionalCssdController extends Controller
             'cssd_item_id' => $request->cssd_item_id,
             'cssd_keluar_log_id' => $keluar->id,
             'metode_steril' => $request->metode_steril,
-            'tanggal_steril' => $request->tanggal_masuk,
+            'tanggal_steril' => $request->tanggal_steril,
+            'masa_expire_bulan' => $request->masa_expire_bulan,
+            'tanggal_expire_steril' => $tanggalExpireSteril,
             'petugas' => $petugasSterilisasi,
             'keterangan' =>
                 'Sterilisasi setelah barang masuk dari ruangan',
@@ -435,8 +492,11 @@ class OperasionalCssdController extends Controller
         $this->simpanLog(
             $request->cssd_item_id,
             'STERILISASI',
-            'Sterilisasi metode ' . $request->metode_steril,
-            $request->tanggal_masuk,
+            'Sterilisasi metode ' .
+                $request->metode_steril .
+                ', expire steril ' .
+                $tanggalExpireSteril,
+            $request->tanggal_steril,
             $petugasSterilisasi
         );
 
@@ -534,6 +594,7 @@ class OperasionalCssdController extends Controller
                     'tanggal_penggunaan' => $request->tanggal_keluar,
                     'nama_section_pengguna' => $request->nama_section_pengguna,
                     'no_rm' => '-',
+                    'nama_pasien' => '-',
                     'nama_dpjp' => '-',
                     'nama_perawat' => '-',
                     'petugas' => $request->petugas,
@@ -593,6 +654,7 @@ class OperasionalCssdController extends Controller
                 'keluar.jam_penggunaan',
                 'keluar.nama_section_pengguna',
                 'keluar.no_rm',
+                'keluar.nama_pasien',
                 'keluar.nama_dpjp',
                 'keluar.nama_perawat',
                 'keluar.petugas',
@@ -602,6 +664,8 @@ class OperasionalCssdController extends Controller
                 'item.kode_unik',
                 'item.reuse_ke',
                 'item.last_unit',
+                'item.tanggal_steril_terakhir',
+                'item.tanggal_expire_steril',
                 'bmhp.nama as nama_bmhp',
                 'bmhp.max_reuse'
             );
@@ -632,6 +696,11 @@ class OperasionalCssdController extends Controller
                         '%' . $search . '%'
                     )
                     ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
+                    ->orWhere(
+                        'keluar.nama_pasien',
+                        'like',
+                        '%' . $search . '%'
+                    )
                     ->orWhere(
                         'keluar.nama_dpjp',
                         'like',
@@ -670,6 +739,7 @@ class OperasionalCssdController extends Controller
             'jam_penggunaan' => 'required|date_format:H:i',
             'nama_section_pengguna' => 'required|string|max:255',
             'no_rm' => 'required|string|max:100',
+            'nama_pasien' => 'required|string|max:255',
             'nama_dpjp' => 'required|string|max:255',
             'nama_perawat' => 'required|string|max:255',
             'hasil_uji_perawat' => [
@@ -737,6 +807,7 @@ class OperasionalCssdController extends Controller
                         'jam_penggunaan' => $request->jam_penggunaan,
                         'nama_section_pengguna' => $request->nama_section_pengguna,
                         'no_rm' => $request->no_rm,
+                        'nama_pasien' => $request->nama_pasien,
                         'nama_dpjp' => $request->nama_dpjp,
                         'nama_perawat' => $request->nama_perawat,
                         'tanggal_uji_perawat' => $request->tanggal_penggunaan,

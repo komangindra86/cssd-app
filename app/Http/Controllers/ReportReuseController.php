@@ -96,7 +96,8 @@ class ReportReuseController extends Controller
                 'uji.petugas as petugas_cssd',
                 'keluar.tanggal_penggunaan',
                 'keluar.nama_section_pengguna as nama_pengguna',
-                'keluar.no_rm'
+                'keluar.no_rm',
+                'keluar.nama_pasien'
             );
 
         $this->applyTanggal($data, $request, 'uji.tanggal_uji');
@@ -108,6 +109,7 @@ class ReportReuseController extends Controller
                 $query->where('item.kode_unik', 'like', '%' . $search . '%')
                     ->orWhere('bmhp.nama', 'like', '%' . $search . '%')
                     ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.nama_pasien', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_section_pengguna', 'like', '%' . $search . '%')
                     ->orWhere('uji.catatan', 'like', '%' . $search . '%')
                     ->orWhere('uji.petugas', 'like', '%' . $search . '%');
@@ -139,6 +141,7 @@ class ReportReuseController extends Controller
                 'tanggal_penggunaan' => $row->tanggal_penggunaan ?: '',
                 'nama_pengguna' => $row->nama_pengguna ?: '',
                 'no_rm' => $row->no_rm ?: '',
+                'nama_pasien' => $row->nama_pasien ?: '',
                 'kondisi_rusak' => !empty($kondisi) ? implode(', ', $kondisi) : ($row->catatan ?: 'Tidak layak'),
                 'catatan' => $row->catatan ?: '',
                 'petugas_cssd' => $row->petugas_cssd,
@@ -199,6 +202,7 @@ class ReportReuseController extends Controller
                 'keluar.tanggal_penggunaan',
                 'keluar.nama_section_pengguna as nama_pengguna',
                 'keluar.no_rm',
+                'keluar.nama_pasien',
                 'keluar.nama_dpjp',
                 'keluar.nama_perawat',
                 'keluar.petugas as petugas_keluar',
@@ -233,6 +237,7 @@ class ReportReuseController extends Controller
                     ->orWhere('bmhp.nama', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_section_pengguna', 'like', '%' . $search . '%')
                     ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.nama_pasien', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_dpjp', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_perawat', 'like', '%' . $search . '%')
                     ->orWhere('masuk.petugas', 'like', '%' . $search . '%')
@@ -274,6 +279,7 @@ class ReportReuseController extends Controller
                 'tanggal_penggunaan' => $row->tanggal_penggunaan,
                 'nama_pengguna' => $row->nama_pengguna,
                 'no_rm' => $row->no_rm,
+                'nama_pasien' => $row->nama_pasien,
                 'nama_dpjp' => $row->nama_dpjp,
                 'nama_perawat' => $row->nama_perawat,
                 'nama_petugas_cssd' => $this->petugasCssdText($row) ?: $row->petugas_keluar,

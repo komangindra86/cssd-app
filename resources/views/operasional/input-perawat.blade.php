@@ -30,6 +30,10 @@
                     <datalist id="listnormrawatinap"></datalist>
                 </div>
                 <div>
+                    <label class="mb-2 block text-sm font-medium text-slate-700">Nama Pasien</label>
+                    <input type="text" id="namapasien" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
+                </div>
+                <div>
                     <label class="mb-2 block text-sm font-medium text-slate-700">Nama DPJP</label>
                     <input type="text" id="namadpjp" list="listpegawai" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
                 </div>
@@ -81,6 +85,8 @@
                                 <th class="border border-slate-200 p-2">Ruangan</th>
                                 <th class="border border-slate-200 p-2">Perawat Penerima</th>
                                 <th class="border border-slate-200 p-2">Reuse</th>
+                                <th class="border border-slate-200 p-2">Tanggal Steril</th>
+                                <th class="border border-slate-200 p-2">Tanggal Expire</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -139,6 +145,7 @@
             var jam_penggunaan = $("#jampenggunaan").val();
             var nama_section_pengguna = $("#namasectionpengguna").val().trim();
             var no_rm = $("#norm").val().trim();
+            var nama_pasien = $("#namapasien").val().trim();
             var nama_dpjp = $("#namadpjp").val().trim();
             var nama_perawat = $("#namaperawat").val().trim();
             var hasil_uji_perawat = $("#hasiluji").val();
@@ -154,17 +161,19 @@
             if (jam_penggunaan === "") { $("#jampenggunaan").after('<span class="error-message text-red-500">Jam penggunaan wajib diisi</span>'); isValid = false; }
             if (nama_section_pengguna === "") { $("#namasectionpengguna").after('<span class="error-message text-red-500">Nama ruangan wajib diisi</span>'); isValid = false; }
             if (no_rm === "") { $("#norm").after('<span class="error-message text-red-500">No. RM wajib diisi</span>'); isValid = false; }
+            if (nama_pasien === "") { $("#namapasien").after('<span class="error-message text-red-500">Nama pasien wajib diisi</span>'); isValid = false; }
             if (nama_dpjp === "") { $("#namadpjp").after('<span class="error-message text-red-500">Nama DPJP wajib diisi</span>'); isValid = false; }
             if (nama_perawat === "") { $("#namaperawat").after('<span class="error-message text-red-500">Nama perawat wajib diisi</span>'); isValid = false; }
             if (hasil_uji_perawat === "") { $("#hasiluji").after('<span class="error-message text-red-500">Hasil kelayakan wajib dipilih</span>'); isValid = false; }
             if (!isValid) return null;
 
-            return { _token: "{{ csrf_token() }}", cssd_keluar_log_ids, tanggal_penggunaan, jam_penggunaan, nama_section_pengguna, no_rm, nama_dpjp, nama_perawat, hasil_uji_perawat, kriteria_rusak, catatan };
+            return { _token: "{{ csrf_token() }}", cssd_keluar_log_ids, tanggal_penggunaan, jam_penggunaan, nama_section_pengguna, no_rm, nama_pasien, nama_dpjp, nama_perawat, hasil_uji_perawat, kriteria_rusak, catatan };
         }
 
         function kosong() {
             itemdipilih = {};
             $("#norm").val('');
+            $("#namapasien").val('');
             $("#namadpjp").val('');
             $("#namaperawat").val('');
             $("#hasiluji").val('LAYAK');
@@ -208,8 +217,24 @@
                     { data: 'nama_section_pengguna', render: function(data) { return tampil(data); } },
                     { data: 'perawat_penerima', render: function(data) { return tampil(data); } },
                     { data: null, render: function(data) { return tampil((data.reuse_ke_keluar || data.reuse_ke) + 'x/' + data.max_reuse + 'x'); } },
+                    { data: 'tanggal_steril_terakhir', render: function(data) { return tampil(data || '-'); } },
+                    { data: 'tanggal_expire_steril', render: function(data) { return statusexpire(data); } },
                 ]
             });
+        }
+
+        function statusexpire(tanggal) {
+            if (!tanggal) {
+                return '-';
+            }
+
+            var today = new Date().toISOString().slice(0, 10);
+
+            if (tanggal < today) {
+                return '<span class="font-semibold text-red-600">' + tampil(tanggal) + ' (Expired)</span>';
+            }
+
+            return tampil(tanggal);
         }
 
         function bahasaDatatable() {
@@ -318,6 +343,7 @@
                 ruanganaktifdepartemen = '';
                 tanggalaktifpasien = '';
                 $("#norm").val('');
+                $("#namapasien").val('');
                 $("#namadpjp").val('');
                 daftarpasienrawatinap = [];
                 rendernormrawatinap();
@@ -329,6 +355,7 @@
             }
 
             $("#norm").val('');
+            $("#namapasien").val('');
             $("#namadpjp").val('');
             daftarpasienrawatinap = [];
             ruanganaktifid = ruangan.id;
@@ -376,6 +403,7 @@
                 return;
             }
 
+            $("#namapasien").val(pasien.nama_pasien);
             $("#namadpjp").val(pasien.nama_dpjp);
         }
 

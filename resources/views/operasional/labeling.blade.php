@@ -6,7 +6,7 @@
     <div class="p-6">
         <div class="mb-6">
             <h1 class="text-2xl font-bold text-slate-800">Cetak Label Reuse</h1>
-            <p class="mt-1 text-sm text-slate-500">Cetak label QR untuk alat READY agar bisa discan saat barang masuk.</p>
+            <p class="mt-1 text-sm text-slate-500">Cetak label QR untuk BMHP reuse agar bisa discan saat penerimaan.</p>
         </div>
 
         <div class="mb-6 rounded border border-slate-200 bg-white p-6">
@@ -15,7 +15,7 @@
                     <label class="mb-2 block text-sm font-medium text-slate-700">Search</label>
                     <input type="text" id="searchlabel"
                         class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs"
-                        placeholder="Cari kode unik, nama BMHP, unit terakhir">
+                        placeholder="Cari kode unik, nama BMHP, ruangan">
                 </div>
                 <div>
                     <label class="mb-2 block text-sm font-medium text-slate-700">Tampil</label>
@@ -35,6 +35,62 @@
         </div>
     </div>
 @endsection
+
+@push('styles')
+    <style>
+        .label-print {
+            width: 45mm;
+            height: 20mm;
+            display: flex;
+            align-items: center;
+            gap: 1.2mm;
+            overflow: hidden;
+            padding: 1.5mm;
+            border: 0.2mm solid #111827;
+            background: #ffffff;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        .qr-label {
+            width: 15mm;
+            height: 15mm;
+            flex: none;
+        }
+
+        .qr-label img,
+        .qr-label canvas {
+            width: 15mm !important;
+            height: 15mm !important;
+            display: block;
+        }
+
+        .label-info {
+            min-width: 0;
+            flex: 1;
+            font-size: 5.4pt;
+            line-height: 1.12;
+            color: #111827;
+        }
+
+        .label-info h2 {
+            margin: 0 0 0.6mm;
+            font-size: 6.8pt;
+            line-height: 1;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .label-info p {
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    </style>
+@endpush
 
 @push('scripts')
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
@@ -80,15 +136,14 @@
 
                 response.data.forEach(function(item) {
                     area.append(`
-                        <div class="label-card rounded border border-slate-300 bg-white p-4" id="label-${item.id}">
-                            <div class="flex gap-4">
-                                <div id="qr-${item.id}" class="h-24 w-24"></div>
-                                <div class="text-sm">
-                                    <h2 class="font-bold text-slate-800">${tampil(item.kode_unik)}</h2>
+                        <div class="rounded border border-slate-300 bg-white p-4">
+                            <div class="label-print" id="label-${item.id}">
+                                <div id="qr-${item.id}" class="qr-label"></div>
+                                <div class="label-info">
+                                    <h2>${tampil(item.kode_unik)}</h2>
                                     <p>${tampil(item.nama_bmhp)}</p>
-                                    <p>Reuse ke-${tampil(item.reuse_ke)}</p>
-                                    <p>Max ${tampil(item.max_reuse)}x</p>
-                                    <p>Status ${tampil(item.status)}</p>
+                                    <p>Ruangan: ${tampil(item.last_unit || '-')}</p>
+                                    <p>Reuse ${tampil(item.reuse_ke)}/${tampil(item.max_reuse)}</p>
                                 </div>
                             </div>
                             <button onclick="cetaklabel(${item.id})" class="mt-4 rounded bg-teal-500 px-3 py-2 text-xs font-medium text-white hover:bg-teal-600">Cetak Label</button>
@@ -97,8 +152,8 @@
 
                     new QRCode(document.getElementById('qr-' + item.id), {
                         text: item.kode_unik,
-                        width: 96,
-                        height: 96
+                        width: 58,
+                        height: 58
                     });
                 });
 
@@ -108,15 +163,83 @@
         }
 
         function cetaklabel(id) {
-            var isi = document.getElementById('label-' + id).innerHTML;
+            var qr = document.querySelector('#qr-' + id + ' img, #qr-' + id + ' canvas');
+            var qrSrc = '';
+
+            if (qr) {
+                qrSrc = qr.tagName.toLowerCase() === 'canvas' ? qr.toDataURL('image/png') : qr.src;
+            }
+
+            var info = document.querySelector('#label-' + id + ' .label-info').innerHTML;
+            var isi = `
+                <div class="label-print">
+                    <div class="qr-label"><img src="${qrSrc}" alt="QR"></div>
+                    <div class="label-info">${info}</div>
+                </div>
+            `;
             var win = window.open('', '_blank');
             win.document.write(`
                 <html>
                 <head>
                     <title>Cetak Label</title>
                     <style>
-                        body { font-family: Arial, sans-serif; padding: 12px; }
-                        button { display: none; }
+                        @page { size: 45mm 20mm; margin: 0; }
+                        * { box-sizing: border-box; }
+                        html, body {
+                            width: 45mm;
+                            height: 20mm;
+                            margin: 0;
+                            padding: 0;
+                            font-family: Arial, sans-serif;
+                        }
+                        body {
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        }
+                        .label-print {
+                            width: 45mm;
+                            height: 20mm;
+                            display: flex;
+                            align-items: center;
+                            gap: 1.2mm;
+                            overflow: hidden;
+                            padding: 1.5mm;
+                            border: 0.2mm solid #111827;
+                        }
+                        .qr-label {
+                            width: 15mm;
+                            height: 15mm;
+                            flex: none;
+                        }
+                        .qr-label img,
+                        .qr-label canvas {
+                            width: 15mm !important;
+                            height: 15mm !important;
+                            display: block;
+                        }
+                        .label-info {
+                            min-width: 0;
+                            flex: 1;
+                            font-size: 5.4pt;
+                            line-height: 1.12;
+                            color: #111827;
+                        }
+                        .label-info h2 {
+                            margin: 0 0 0.6mm;
+                            font-size: 6.8pt;
+                            line-height: 1;
+                            font-weight: 700;
+                            white-space: nowrap;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                        }
+                        .label-info p {
+                            margin: 0;
+                            white-space: nowrap;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                        }
                     </style>
                 </head>
                 <body>${isi}</body>

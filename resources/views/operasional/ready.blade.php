@@ -8,7 +8,7 @@
             <h1 class="text-2xl font-bold text-slate-800">Alat Ready</h1>
             <p class="mt-1 text-sm text-slate-500">Daftar item alat yang sudah siap digunakan kembali.</p>
         </div>
-        <x-item-status-table table-id="tbready" />
+        <x-item-status-table table-id="tbready" :show-penerimaan="true" />
     </div>
 @endsection
 
@@ -42,6 +42,7 @@
                     { data: 'reuse_ke', render: function(data) { return tampil(data) + 'x'; } },
                     { data: 'max_reuse', render: function(data) { return tampil(data) + 'x'; } },
                     { data: 'status', render: function(data) { return tampil(data); } },
+                    { data: 'tanggal_penerimaan', render: function(data) { return tampil(data || '-'); } },
                     { data: 'last_unit', render: function(data) { return tampil(data); } },
                 ]
             });

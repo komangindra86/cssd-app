@@ -19,20 +19,20 @@
 
         @if (auth()->user()?->isCssd())
             <p class="mb-3 mt-5 px-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Operasional CSSD</p>
-            <a href="{{ route('barang-keluar') }}"
-                class="mb-2 flex items-center rounded px-3 py-2 text-sm font-medium transition {{ request()->routeIs('barang-keluar') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-teal-50 hover:text-teal-700' }}">
-                <i class="fad fa-sign-out-alt mr-3 w-4 text-xs"></i>
-                Barang Keluar
-            </a>
             <a href="{{ route('barang-masuk') }}"
                 class="mb-2 flex items-center rounded px-3 py-2 text-sm font-medium transition {{ request()->routeIs('barang-masuk') || request()->routeIs('masuk-cssd') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-teal-50 hover:text-teal-700' }}">
                 <i class="fad fa-inbox-in mr-3 w-4 text-xs"></i>
-                Barang Masuk
+                Penerimaan BMHP Reuse
             </a>
             <a href="{{ route('labeling') }}"
                 class="mb-2 flex items-center rounded px-3 py-2 text-sm font-medium transition {{ request()->routeIs('labeling') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-teal-50 hover:text-teal-700' }}">
                 <i class="fad fa-tags mr-3 w-4 text-xs"></i>
                 Labeling Reuse
+            </a>
+            <a href="{{ route('barang-keluar') }}"
+                class="mb-2 flex items-center rounded px-3 py-2 text-sm font-medium transition {{ request()->routeIs('barang-keluar') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-teal-50 hover:text-teal-700' }}">
+                <i class="fad fa-sign-out-alt mr-3 w-4 text-xs"></i>
+                Pendistribusian BMHP Reuse
             </a>
             <a href="{{ route('ready') }}"
                 class="mb-2 flex items-center rounded px-3 py-2 text-sm font-medium transition {{ request()->routeIs('ready') ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-teal-50 hover:text-teal-700' }}">

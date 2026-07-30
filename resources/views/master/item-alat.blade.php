@@ -50,12 +50,12 @@
                 </div>
 
                 <div>
-                    <label for="lastunit" class="mb-2 block text-sm font-medium text-slate-700">Unit Terakhir</label>
+                    <label for="lastunit" class="mb-2 block text-sm font-medium text-slate-700">Ruangan</label>
                     <div class="relative" id="unitdropdownwrap">
                         <input type="text" id="lastunit" autocomplete="off"
                             onfocus="bukadropdownunit()" oninput="renderdropdownunit()"
                             class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 pr-9 text-xs text-slate-900 focus:border-teal-500 focus:ring-teal-500"
-                            placeholder="Ketik / pilih unit">
+                            placeholder="Ketik / pilih ruangan">
                         <button type="button" onclick="toggledropdownunit()"
                             class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500 hover:text-slate-700">
                             &#9662;
@@ -91,7 +91,7 @@
                                 <th class="border border-slate-200 p-2">Reuse Ke</th>
                                 <th class="border border-slate-200 p-2">Max Reuse</th>
                                 <th class="border border-slate-200 p-2">Status</th>
-                                <th class="border border-slate-200 p-2">Unit Terakhir</th>
+                                <th class="border border-slate-200 p-2">Ruangan</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -247,7 +247,7 @@
                 renderdropdownunit(null, false);
             }).fail(function() {
                 daftarunit = [];
-                renderdropdownunit('Unit tidak bisa dimuat', false);
+                renderdropdownunit('Ruangan tidak bisa dimuat', false);
             });
         }
 
@@ -279,7 +279,7 @@
             if (pesan) {
                 html = '<div class="px-3 py-2 text-slate-500">' + tampil(pesan) + '</div>';
             } else if (hasil.length === 0) {
-                html = '<div class="px-3 py-2 text-slate-500">Data unit tidak ditemukan</div>';
+                html = '<div class="px-3 py-2 text-slate-500">Data ruangan tidak ditemukan</div>';
             } else {
                 hasil.forEach(function(unit) {
                     html += '<button type="button" data-nama="' + atribut(unit.nama) + '" class="pilihan-unit block w-full px-3 py-2 text-left text-slate-700 hover:bg-teal-50 hover:text-teal-700">' + tampil(unit.nama) + '</button>';

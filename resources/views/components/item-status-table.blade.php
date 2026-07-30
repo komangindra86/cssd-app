@@ -1,3 +1,5 @@
+@props(['tableId', 'showPenerimaan' => false])
+
 <div class="rounded border border-slate-200 bg-white">
     <div class="grid p-6">
         <div class="overflow-x-auto">
@@ -9,7 +11,10 @@
                         <th class="border border-slate-200 p-2">Reuse Ke</th>
                         <th class="border border-slate-200 p-2">Max Reuse</th>
                         <th class="border border-slate-200 p-2">Status</th>
-                        <th class="border border-slate-200 p-2">Unit Terakhir</th>
+                        @if ($showPenerimaan)
+                            <th class="border border-slate-200 p-2">Tgl Penerimaan</th>
+                        @endif
+                        <th class="border border-slate-200 p-2">Ruangan</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
