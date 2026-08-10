@@ -51,11 +51,12 @@
                     <table id="tbreadykeluar" class="display cell-border compact w-full text-sm">
                         <thead>
                             <tr class="bg-slate-100">
-                                <th class="border border-slate-200 p-2">Pilih</th>
+                                <th class="border border-slate-200 p-2">Pilih Item</th>
                                 <th class="border border-slate-200 p-2">Kode Unik</th>
                                 <th class="border border-slate-200 p-2">Nama Alat</th>
                                 <th class="border border-slate-200 p-2">Reuse</th>
                                 <th class="border border-slate-200 p-2">Max Reuse</th>
+                                <th class="border border-slate-200 p-2">Approval</th>
                                 <th class="border border-slate-200 p-2">Ruangan</th>
                             </tr>
                         </thead>
@@ -64,12 +65,33 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-6 px-6 pb-6 lg:grid-cols-1">
-                <button onclick="simpan()" class="rounded bg-teal-500 px-4 py-2 text-sm font-medium text-white shadow hover:bg-teal-600">Simpan</button>
+            <div class="flex flex-wrap gap-3 px-6 pb-6">
+                <button onclick="simpan()" class="rounded bg-teal-500 px-4 py-2 text-sm font-medium text-white shadow hover:bg-teal-600">Simpan Distribusi</button>
+                <button onclick="simpantidaklayak()" class="rounded border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-600 shadow-sm hover:bg-red-50">Tandai Tidak Layak</button>
             </div>
         </div>
 
-        <x-operasional-table table-id="tbkeluar" />
+        <div class="rounded border border-slate-200 bg-white">
+            <div class="grid p-6">
+                <div class="overflow-x-auto">
+                    <table id="tbkeluar" class="display cell-border compact w-full text-sm">
+                        <thead>
+                            <tr class="bg-slate-100">
+                                <th class="border border-slate-200 p-2">Tanggal Distribusi</th>
+                                <th class="border border-slate-200 p-2">Kode Unik</th>
+                                <th class="border border-slate-200 p-2">Nama BMHP</th>
+                                <th class="border border-slate-200 p-2">Status</th>
+                                <th class="border border-slate-200 p-2">Ruangan</th>
+                                <th class="border border-slate-200 p-2">Petugas CSSD</th>
+                                <th class="border border-slate-200 p-2">Perawat Yang Menerima</th>
+                                <th class="border border-slate-200 p-2">Keterangan</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
 @endsection
 
@@ -99,6 +121,7 @@
 
                 hitungdipilih();
             });
+
         });
 
         function tampil(nilai) {
@@ -175,6 +198,7 @@
                         searchable: false,
                         render: function(data) {
                             var checked = itemdipilih[data.id] ? 'checked' : '';
+
                             return `<input type="checkbox" class="pilihitem" value="${data.id}" ${checked}>`;
                         }
                     },
@@ -182,6 +206,19 @@
                     { data: 'nama_bmhp', render: function(data) { return tampil(data); } },
                     { data: 'reuse_ke', render: function(data) { return tampil(data + 'x'); } },
                     { data: 'max_reuse', render: function(data) { return tampil(data + 'x'); } },
+                    { data: null, render: function(data) {
+                        var sudahmax = parseInt(data.reuse_ke || 0) >= parseInt(data.max_reuse || 0);
+
+                        if (parseInt(data.approval_over_reuse || 0) === 1) {
+                            return tampil('Over max: ' + (data.approval_dpjp || '-'));
+                        }
+
+                        if (sudahmax) {
+                            return '<span class="text-xs font-semibold text-red-600">Butuh approval</span>';
+                        }
+
+                        return '-';
+                    } },
                     { data: 'last_unit', render: function(data) { return tampil(data || '-'); } },
                 ]
             });
@@ -192,19 +229,23 @@
                 processing: true,
                 serverSide: true,
                 ajax: {
-                    url: '/operasional/log-data',
-                    data: function(d) {
-                        d.status = 'KELUAR';
-                    }
+                    url: '/operasional/distribusi-data'
                 },
                 pageLength: 10,
                 language: bahasaDatatable(),
                 columns: [
-                    { data: 'tanggal', render: function(data) { return tampil(data); } },
+                    { data: null, render: function(data) {
+                        var tanggal = data.tanggal_keluar || '-';
+                        var jam = data.jam_keluar || '';
+
+                        return tampil((tanggal + ' ' + jam).trim());
+                    } },
                     { data: 'kode_unik', render: function(data) { return tampil(data); } },
                     { data: 'nama_bmhp', render: function(data) { return tampil(data); } },
                     { data: 'status', render: function(data) { return tampil(data); } },
+                    { data: 'nama_section_pengguna', render: function(data) { return tampil(data); } },
                     { data: 'petugas', render: function(data) { return tampil(data); } },
+                    { data: 'perawat_penerima', render: function(data) { return tampil(data); } },
                     { data: 'keterangan', render: function(data) { return tampil(data); } },
                 ]
             });
@@ -240,6 +281,66 @@
                     tabelreadykeluar.ajax.reload(null, false);
                     getlog();
                     kosong();
+                },
+                error: function(xhr) { alert('Terjadi kesalahan: ' + pesanerror(xhr)); }
+            });
+        }
+
+        function simpantidaklayak() {
+            var cssd_item_ids = Object.keys(itemdipilih);
+
+            if (cssd_item_ids.length === 0) {
+                $("#tbreadykeluar").before('<span class="error-message mb-2 block text-red-500">Pilih minimal satu item yang tidak layak</span>');
+                return;
+            }
+
+            var tanggal_uji = $("#tanggalkeluar").val();
+            var petugas = $("#petugas").val().trim();
+
+            $(".error-message").remove();
+
+            if (tanggal_uji === "") {
+                $("#tanggalkeluar").after('<span class="error-message text-red-500">Tanggal wajib diisi</span>');
+                return;
+            }
+
+            if (petugas === "") {
+                $("#petugas").after('<span class="error-message text-red-500">Petugas CSSD wajib diisi</span>');
+                return;
+            }
+
+            var catatan = prompt('Catatan kenapa alat tidak layak / rusak:', '');
+
+            if (catatan === null) {
+                return;
+            }
+
+            catatan = catatan.trim();
+
+            if (catatan === "") {
+                alert('Catatan wajib diisi agar audit trail jelas.');
+                return;
+            }
+
+            if (!confirm('Pindahkan ' + cssd_item_ids.length + ' item ke DISPOSE / STOP PENGGUNAAN?')) {
+                return;
+            }
+
+            $.ajax({
+                url: '/barang-keluar/tidak-layak',
+                type: 'POST',
+                data: {
+                    _token: "{{ csrf_token() }}",
+                    cssd_item_ids: cssd_item_ids,
+                    tanggal_uji: tanggal_uji,
+                    petugas: petugas,
+                    catatan: catatan
+                },
+                success: function(response) {
+                    alert(response.message || 'Item berhasil dipindahkan ke DISPOSE.');
+                    itemdipilih = {};
+                    hitungdipilih();
+                    tabelreadykeluar.ajax.reload(null, false);
                 },
                 error: function(xhr) { alert('Terjadi kesalahan: ' + pesanerror(xhr)); }
             });

@@ -90,6 +90,7 @@
                             <th class="border border-slate-300 p-2">CATATAN</th>
                             <th class="border border-slate-300 p-2">PERAWAT UJI</th>
                             <th class="border border-slate-300 p-2">STATUS</th>
+                            <th class="border border-slate-300 p-2">APPROVAL OVER REUSE</th>
                             <th class="border border-slate-300 p-2">KET</th>
                         </tr>
                     </thead>
@@ -125,6 +126,7 @@
                             <th class="border border-slate-300 p-2">PETUGAS CSSD</th>
                             <th class="border border-slate-300 p-2">TANGGAL DITERIMA CSSD</th>
                             <th class="border border-slate-300 p-2">KONDISI ALAT</th>
+                            <th class="border border-slate-300 p-2">APPROVAL OVER REUSE</th>
                             <th class="border border-slate-300 p-2">KET</th>
                         </tr>
                     </thead>
@@ -168,6 +170,7 @@
                             <th class="border border-slate-300 p-2">PETUGAS CSSD</th>
                             <th class="border border-slate-300 p-2">TANGGAL DITERIMA CSSD</th>
                             <th class="border border-slate-300 p-2">KONDISI ALAT</th>
+                            <th class="border border-slate-300 p-2">APPROVAL OVER REUSE</th>
                             <th class="border border-slate-300 p-2">KET</th>
                         </tr>
                     </thead>
@@ -327,6 +330,7 @@
                     { data: 'catatan', render: function(data) { return tampil(data); } },
                     { data: 'petugas_cssd', render: function(data) { return tampil(data); } },
                     { data: 'status', render: function(data) { return tampil(data); } },
+                    { data: 'approval_over_reuse', render: function(data) { return tampil(data); } },
                     { data: 'ket', render: function(data) { return tampil(data); } },
                 ]
             });
@@ -392,6 +396,7 @@
                 { data: 'nama_petugas_cssd', render: function(data) { return tampil(data); } },
                 { data: 'tanggal_diterima_cssd', render: function(data) { return tampil(data); } },
                 { data: 'kondisi_alat', render: function(data) { return tampil(data); } },
+                { data: 'approval_over_reuse', render: function(data) { return tampil(data); } },
                 { data: 'ket', render: function(data) { return tampil(data); } }
             );
 
@@ -459,6 +464,7 @@
                 { title: 'CATATAN', key: 'catatan' },
                 { title: 'PERAWAT UJI', key: 'petugas_cssd' },
                 { title: 'STATUS', key: 'status' },
+                { title: 'APPROVAL OVER REUSE', key: 'approval_over_reuse' },
                 { title: 'KET', key: 'ket' },
             ];
 
@@ -478,6 +484,7 @@
                 { title: 'PETUGAS CSSD', key: 'nama_petugas_cssd' },
                 { title: 'TANGGAL DITERIMA CSSD', key: 'tanggal_diterima_cssd' },
                 { title: 'KONDISI ALAT', key: 'kondisi_alat' },
+                { title: 'APPROVAL OVER REUSE', key: 'approval_over_reuse' },
                 { title: 'KET', key: 'ket' },
             ];
 
@@ -495,6 +502,7 @@
                 { title: 'PETUGAS CSSD', key: 'nama_petugas_cssd' },
                 { title: 'TANGGAL DITERIMA CSSD', key: 'tanggal_diterima_cssd' },
                 { title: 'KONDISI ALAT', key: 'kondisi_alat' },
+                { title: 'APPROVAL OVER REUSE', key: 'approval_over_reuse' },
                 { title: 'KET', key: 'ket' },
             ];
 

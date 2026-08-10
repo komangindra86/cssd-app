@@ -65,7 +65,7 @@
                     <a href="{{ route('labeling') }}"
                         class="rounded border border-slate-200 p-4 transition hover:border-teal-300 hover:bg-teal-50">
                         <p class="text-sm font-bold text-slate-800">3. Labeling Reuse</p>
-                        <p class="mt-2 text-xs text-slate-500">Cetak label QR untuk alat ready.</p>
+                        <p class="mt-2 text-xs text-slate-500">Cetak label barcode untuk alat ready.</p>
                     </a>
 
                     <a href="{{ route('laporan-reuse') }}"

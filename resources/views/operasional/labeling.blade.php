@@ -6,7 +6,7 @@
     <div class="p-6">
         <div class="mb-6">
             <h1 class="text-2xl font-bold text-slate-800">Cetak Label Reuse</h1>
-            <p class="mt-1 text-sm text-slate-500">Cetak label QR untuk BMHP reuse agar bisa discan saat penerimaan.</p>
+            <p class="mt-1 text-sm text-slate-500">Cetak label barcode untuk BMHP reuse agar bisa discan saat penerimaan.</p>
         </div>
 
         <div class="mb-6 rounded border border-slate-200 bg-white p-6">
@@ -42,40 +42,40 @@
             width: 45mm;
             height: 20mm;
             display: flex;
-            align-items: center;
-            gap: 1.2mm;
+            flex-direction: column;
+            justify-content: center;
+            gap: 0.6mm;
             overflow: hidden;
-            padding: 1.5mm;
+            padding: 1.1mm 1.4mm;
             border: 0.2mm solid #111827;
             background: #ffffff;
             box-sizing: border-box;
             font-family: Arial, sans-serif;
         }
 
-        .qr-label {
-            width: 15mm;
-            height: 15mm;
+        .barcode-label {
+            width: 42mm;
+            height: 8mm;
             flex: none;
         }
 
-        .qr-label img,
-        .qr-label canvas {
-            width: 15mm !important;
-            height: 15mm !important;
+        .barcode-label svg {
+            width: 42mm !important;
+            height: 8mm !important;
             display: block;
         }
 
         .label-info {
+            width: 42mm;
             min-width: 0;
-            flex: 1;
-            font-size: 5.4pt;
-            line-height: 1.12;
+            font-size: 4.7pt;
+            line-height: 1.05;
             color: #111827;
         }
 
         .label-info h2 {
-            margin: 0 0 0.6mm;
-            font-size: 6.8pt;
+            margin: 0 0 0.3mm;
+            font-size: 6.2pt;
             line-height: 1;
             font-weight: 700;
             white-space: nowrap;
@@ -83,18 +83,36 @@
             text-overflow: ellipsis;
         }
 
-        .label-info p {
+        .label-detail {
             margin: 0;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
+        .label-detail span + span::before {
+            content: " | ";
+            font-weight: 700;
+        }
     </style>
 @endpush
 
 @push('scripts')
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script>
+        var code128Patterns = [
+            '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
+            '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
+            '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
+            '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
+            '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
+            '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
+            '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
+            '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
+            '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
+            '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
+            '114131', '311141', '411131', '211412', '211214', '211232', '2331112'
+        ];
+
         $(document).ready(function() {
             getitem();
             $("#searchlabel").on('keyup', function() { getitem(1); });
@@ -103,6 +121,69 @@
 
         function tampil(nilai) {
             return $('<div>').text(nilai ?? '').html();
+        }
+
+        function xmltext(nilai) {
+            return String(nilai ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&apos;');
+        }
+
+        function barcodeValue(text) {
+            var nilai = [];
+            var safeText = String(text ?? '').replace(/[^\x20-\x7e]/g, '?');
+
+            for (var i = 0; i < safeText.length; i++) {
+                nilai.push(safeText.charCodeAt(i) - 32);
+            }
+
+            return nilai;
+        }
+
+        function barcodeSvg(text) {
+            var values = barcodeValue(text);
+            var checksum = 104;
+            var codes = [104];
+
+            values.forEach(function(value, index) {
+                checksum += value * (index + 1);
+                codes.push(value);
+            });
+
+            codes.push(checksum % 103);
+            codes.push(106);
+
+            var quietZone = 10;
+            var x = quietZone;
+            var bars = '';
+
+            codes.forEach(function(code) {
+                var pattern = code128Patterns[code];
+
+                for (var i = 0; i < pattern.length; i++) {
+                    var width = parseInt(pattern.charAt(i));
+
+                    if (i % 2 === 0) {
+                        bars += '<rect x="' + x + '" y="0" width="' + width + '" height="46"/>';
+                    }
+
+                    x += width;
+                }
+            });
+
+            var totalWidth = x + quietZone;
+
+            return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + totalWidth + ' 46" preserveAspectRatio="none" aria-label="Barcode ' + xmltext(text) + '">' +
+                '<rect width="' + totalWidth + '" height="46" fill="#fff"/>' +
+                '<g fill="#111827">' + bars + '</g>' +
+                '</svg>';
+        }
+
+        function renderBarcode(id, kode) {
+            $("#barcode-" + id).html(barcodeSvg(kode));
         }
 
         function renderPagination(response) {
@@ -138,23 +219,22 @@
                     area.append(`
                         <div class="rounded border border-slate-300 bg-white p-4">
                             <div class="label-print" id="label-${item.id}">
-                                <div id="qr-${item.id}" class="qr-label"></div>
+                                <div id="barcode-${item.id}" class="barcode-label"></div>
                                 <div class="label-info">
                                     <h2>${tampil(item.kode_unik)}</h2>
-                                    <p>${tampil(item.nama_bmhp)}</p>
-                                    <p>Ruangan: ${tampil(item.last_unit || '-')}</p>
-                                    <p>Reuse ${tampil(item.reuse_ke)}/${tampil(item.max_reuse)}</p>
+                                    <p class="label-detail">
+                                        <span>${tampil(item.nama_bmhp)}</span>
+                                        <span>Ruang: ${tampil(item.last_unit || '-')}</span>
+                                        <span>Reuse ${tampil(item.reuse_ke)}/${tampil(item.max_reuse)}</span>
+                                        ${parseInt(item.approval_over_reuse || 0) === 1 ? `<span>OVER MAX: ${tampil(item.approval_dpjp || '-')}</span>` : ''}
+                                    </p>
                                 </div>
                             </div>
                             <button onclick="cetaklabel(${item.id})" class="mt-4 rounded bg-teal-500 px-3 py-2 text-xs font-medium text-white hover:bg-teal-600">Cetak Label</button>
                         </div>
                     `);
 
-                    new QRCode(document.getElementById('qr-' + item.id), {
-                        text: item.kode_unik,
-                        width: 58,
-                        height: 58
-                    });
+                    renderBarcode(item.id, item.kode_unik);
                 });
 
                 $("#infolabel").text(`Menampilkan ${response.from ?? 0} - ${response.to ?? 0} dari ${response.total} data`);
@@ -163,17 +243,12 @@
         }
 
         function cetaklabel(id) {
-            var qr = document.querySelector('#qr-' + id + ' img, #qr-' + id + ' canvas');
-            var qrSrc = '';
-
-            if (qr) {
-                qrSrc = qr.tagName.toLowerCase() === 'canvas' ? qr.toDataURL('image/png') : qr.src;
-            }
-
+            var barcode = document.querySelector('#barcode-' + id);
+            var barcodeHtml = barcode ? barcode.innerHTML : '';
             var info = document.querySelector('#label-' + id + ' .label-info').innerHTML;
             var isi = `
                 <div class="label-print">
-                    <div class="qr-label"><img src="${qrSrc}" alt="QR"></div>
+                    <div class="barcode-label">${barcodeHtml}</div>
                     <div class="label-info">${info}</div>
                 </div>
             `;
@@ -201,44 +276,48 @@
                             width: 45mm;
                             height: 20mm;
                             display: flex;
-                            align-items: center;
-                            gap: 1.2mm;
+                            flex-direction: column;
+                            justify-content: center;
+                            gap: 0.6mm;
                             overflow: hidden;
-                            padding: 1.5mm;
+                            padding: 1.1mm 1.4mm;
                             border: 0.2mm solid #111827;
                         }
-                        .qr-label {
-                            width: 15mm;
-                            height: 15mm;
+                        .barcode-label {
+                            width: 42mm;
+                            height: 8mm;
                             flex: none;
                         }
-                        .qr-label img,
-                        .qr-label canvas {
-                            width: 15mm !important;
-                            height: 15mm !important;
+                        .barcode-label svg {
+                            width: 42mm !important;
+                            height: 8mm !important;
                             display: block;
                         }
                         .label-info {
+                            width: 42mm;
                             min-width: 0;
-                            flex: 1;
-                            font-size: 5.4pt;
-                            line-height: 1.12;
+                            font-size: 4.7pt;
+                            line-height: 1.05;
                             color: #111827;
                         }
                         .label-info h2 {
-                            margin: 0 0 0.6mm;
-                            font-size: 6.8pt;
+                            margin: 0 0 0.3mm;
+                            font-size: 6.2pt;
                             line-height: 1;
                             font-weight: 700;
                             white-space: nowrap;
                             overflow: hidden;
                             text-overflow: ellipsis;
                         }
-                        .label-info p {
+                        .label-detail {
                             margin: 0;
                             white-space: nowrap;
                             overflow: hidden;
                             text-overflow: ellipsis;
+                        }
+                        .label-detail span + span::before {
+                            content: " | ";
+                            font-weight: 700;
                         }
                     </style>
                 </head>

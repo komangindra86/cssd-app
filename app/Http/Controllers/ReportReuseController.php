@@ -97,7 +97,11 @@ class ReportReuseController extends Controller
                 'keluar.tanggal_penggunaan',
                 'keluar.nama_section_pengguna as nama_pengguna',
                 'keluar.no_rm',
-                'keluar.nama_pasien'
+                'keluar.nama_pasien',
+                'keluar.approval_over_reuse',
+                'keluar.approval_dpjp',
+                'keluar.approval_alasan',
+                'keluar.approval_catatan'
             );
 
         $this->applyTanggal($data, $request, 'uji.tanggal_uji');
@@ -111,6 +115,8 @@ class ReportReuseController extends Controller
                     ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_pasien', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_section_pengguna', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.approval_dpjp', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.approval_alasan', 'like', '%' . $search . '%')
                     ->orWhere('uji.catatan', 'like', '%' . $search . '%')
                     ->orWhere('uji.petugas', 'like', '%' . $search . '%');
             });
@@ -146,6 +152,7 @@ class ReportReuseController extends Controller
                 'catatan' => $row->catatan ?: '',
                 'petugas_cssd' => $row->petugas_cssd,
                 'status' => $row->status,
+                'approval_over_reuse' => $this->approvalOverReuseText($row),
                 'ket' => 'DISPOSE / STOP PENGGUNAAN',
             ];
         };
@@ -208,6 +215,10 @@ class ReportReuseController extends Controller
                 'keluar.petugas as petugas_keluar',
                 'keluar.hasil_uji_perawat',
                 'keluar.reuse_ke_keluar',
+                'keluar.approval_over_reuse',
+                'keluar.approval_dpjp',
+                'keluar.approval_alasan',
+                'keluar.approval_catatan',
                 'masuk.petugas as nama_petugas_cssd',
                 'masuk.petugas_penerima_pencucian',
                 'masuk.petugas_pengemasan',
@@ -239,6 +250,8 @@ class ReportReuseController extends Controller
                     ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_pasien', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_dpjp', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.approval_dpjp', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.approval_alasan', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_perawat', 'like', '%' . $search . '%')
                     ->orWhere('masuk.petugas', 'like', '%' . $search . '%')
                     ->orWhere('masuk.petugas_penerima_pencucian', 'like', '%' . $search . '%')
@@ -285,6 +298,7 @@ class ReportReuseController extends Controller
                 'nama_petugas_cssd' => $this->petugasCssdText($row) ?: $row->petugas_keluar,
                 'tanggal_diterima_cssd' => $row->tanggal_diterima_cssd ?: '',
                 'kondisi_alat' => $kondisi,
+                'approval_over_reuse' => $this->approvalOverReuseText($row),
                 'ket' => $ket,
             ];
         };
@@ -340,6 +354,29 @@ class ReportReuseController extends Controller
         }
 
         return $row->nama_petugas_cssd ?? '';
+    }
+
+    private function approvalOverReuseText($row)
+    {
+        if (empty($row->approval_over_reuse)) {
+            return '';
+        }
+
+        $text = 'YA';
+
+        if (!empty($row->approval_dpjp)) {
+            $text .= ' - DPJP: ' . $row->approval_dpjp;
+        }
+
+        if (!empty($row->approval_alasan)) {
+            $text .= '; Alasan: ' . $row->approval_alasan;
+        }
+
+        if (!empty($row->approval_catatan)) {
+            $text .= '; Catatan: ' . $row->approval_catatan;
+        }
+
+        return $text;
     }
 
     private function applyTanggal($query, Request $request, $column)

@@ -53,6 +53,29 @@
                     <label class="mb-2 block text-sm font-medium text-slate-700">Jumlah Item Dipilih</label>
                     <div id="jumlahdipilih" class="rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs text-slate-700">0 item</div>
                 </div>
+                <div id="boxapprovaloverreuse" class="hidden rounded border border-amber-200 bg-amber-50 p-4 lg:col-span-3">
+                    <div class="mb-3 text-xs text-amber-800">
+                        Item yang dipilih sudah mencapai batas maksimal reuse. Jika alat tetap dinyatakan LAYAK dan akan digunakan ulang, approval DPJP/ruangan wajib dicatat.
+                    </div>
+                    <label class="mb-3 flex items-start gap-2 text-sm font-medium text-slate-700">
+                        <input type="checkbox" id="approvaloverreuse" value="1" class="mt-1">
+                        <span>Disetujui reuse melewati batas maksimal oleh DPJP/ruangan</span>
+                    </label>
+                    <div id="detailapprovaloverreuse" class="hidden grid grid-cols-1 gap-4 lg:grid-cols-3">
+                        <div>
+                            <label class="mb-2 block text-sm font-medium text-slate-700">Nama DPJP Approval</label>
+                            <input type="text" id="approvaldpjp" list="listpegawai" class="block w-full rounded-lg border border-slate-300 bg-white p-2 text-xs">
+                        </div>
+                        <div class="lg:col-span-2">
+                            <label class="mb-2 block text-sm font-medium text-slate-700">Alasan Reuse Melewati Batas</label>
+                            <input type="text" id="approvalalasan" class="block w-full rounded-lg border border-slate-300 bg-white p-2 text-xs" placeholder="Contoh: sesuai instruksi DPJP karena kondisi alat masih baik">
+                        </div>
+                        <div class="lg:col-span-3">
+                            <label class="mb-2 block text-sm font-medium text-slate-700">Catatan Approval</label>
+                            <textarea id="approvalcatatan" rows="2" class="block w-full rounded-lg border border-slate-300 bg-white p-2 text-xs"></textarea>
+                        </div>
+                    </div>
+                </div>
                 <div class="lg:col-span-3">
                     <label class="mb-2 block text-sm font-medium text-slate-700">Kriteria Rusak</label>
                     <div class="max-h-28 overflow-y-auto rounded border border-slate-300 bg-slate-50 p-2 text-xs">
@@ -120,15 +143,20 @@
 
             $("#tbperawatkeluar").on('change', '.pilihitem', function() {
                 var id = $(this).val();
+                var data = tabelperawatkeluar.row($(this).closest('tr')).data();
 
                 if ($(this).is(':checked')) {
-                    itemdipilih[id] = true;
+                    itemdipilih[id] = data;
                 } else {
                     delete itemdipilih[id];
                 }
 
                 hitungdipilih();
+                updateapprovaloverreuse();
             });
+
+            $("#hasiluji").on('change', updateapprovaloverreuse);
+            $("#approvaloverreuse").on('change', updateapprovaloverreuse);
         });
 
         function tampil(nilai) {
@@ -150,6 +178,11 @@
             var nama_perawat = $("#namaperawat").val().trim();
             var hasil_uji_perawat = $("#hasiluji").val();
             var catatan = $("#catatan").val().trim();
+            var butuh_approval_over_reuse = butuhapprovaloverreuse() && hasil_uji_perawat === 'LAYAK';
+            var approval_over_reuse = $("#approvaloverreuse").is(':checked') ? 1 : 0;
+            var approval_dpjp = $("#approvaldpjp").val().trim();
+            var approval_alasan = $("#approvalalasan").val().trim();
+            var approval_catatan = $("#approvalcatatan").val().trim();
             var kriteria_rusak = [];
             $(".kriteriarusak:checked").each(function() { kriteria_rusak.push($(this).val()); });
 
@@ -165,9 +198,12 @@
             if (nama_dpjp === "") { $("#namadpjp").after('<span class="error-message text-red-500">Nama DPJP wajib diisi</span>'); isValid = false; }
             if (nama_perawat === "") { $("#namaperawat").after('<span class="error-message text-red-500">Nama perawat wajib diisi</span>'); isValid = false; }
             if (hasil_uji_perawat === "") { $("#hasiluji").after('<span class="error-message text-red-500">Hasil kelayakan wajib dipilih</span>'); isValid = false; }
+            if (butuh_approval_over_reuse && approval_over_reuse !== 1) { $("#boxapprovaloverreuse").append('<span class="error-message block text-red-500">Approval over max reuse wajib dicentang jika alat tetap LAYAK dan akan direuse kembali</span>'); isValid = false; }
+            if (approval_over_reuse === 1 && approval_dpjp === "") { $("#approvaldpjp").after('<span class="error-message text-red-500">Nama DPJP approval wajib diisi</span>'); isValid = false; }
+            if (approval_over_reuse === 1 && approval_alasan === "") { $("#approvalalasan").after('<span class="error-message text-red-500">Alasan approval wajib diisi</span>'); isValid = false; }
             if (!isValid) return null;
 
-            return { _token: "{{ csrf_token() }}", cssd_keluar_log_ids, tanggal_penggunaan, jam_penggunaan, nama_section_pengguna, no_rm, nama_pasien, nama_dpjp, nama_perawat, hasil_uji_perawat, kriteria_rusak, catatan };
+            return { _token: "{{ csrf_token() }}", cssd_keluar_log_ids, tanggal_penggunaan, jam_penggunaan, nama_section_pengguna, no_rm, nama_pasien, nama_dpjp, nama_perawat, hasil_uji_perawat, kriteria_rusak, catatan, approval_over_reuse, approval_dpjp, approval_alasan, approval_catatan };
         }
 
         function kosong() {
@@ -178,14 +214,48 @@
             $("#namaperawat").val('');
             $("#hasiluji").val('LAYAK');
             $("#catatan").val('');
+            $("#approvaloverreuse").prop('checked', false);
+            $("#approvaldpjp").val('');
+            $("#approvalalasan").val('');
+            $("#approvalcatatan").val('');
             $(".kriteriarusak").prop('checked', false);
             $(".error-message").remove();
             hitungdipilih();
+            updateapprovaloverreuse();
             tabelperawatkeluar.ajax.reload(null, false);
         }
 
         function hitungdipilih() {
             $("#jumlahdipilih").text(Object.keys(itemdipilih).length + ' item');
+        }
+
+        function butuhapprovaloverreuse() {
+            return Object.values(itemdipilih).some(function(item) {
+                var reuse = parseInt(item.reuse_ke_keluar || item.reuse_ke || 0);
+                var max = parseInt(item.max_reuse || 0);
+
+                return max > 0 && reuse >= max;
+            });
+        }
+
+        function updateapprovaloverreuse() {
+            var butuh = butuhapprovaloverreuse() && $("#hasiluji").val() === 'LAYAK';
+
+            if (butuh) {
+                $("#boxapprovaloverreuse").removeClass('hidden');
+            } else {
+                $("#boxapprovaloverreuse").addClass('hidden');
+                $("#approvaloverreuse").prop('checked', false);
+            }
+
+            if ($("#approvaloverreuse").is(':checked')) {
+                $("#detailapprovaloverreuse").removeClass('hidden');
+            } else {
+                $("#detailapprovaloverreuse").addClass('hidden');
+                $("#approvaldpjp").val('');
+                $("#approvalalasan").val('');
+                $("#approvalcatatan").val('');
+            }
         }
 
         function datatableperawatkeluar() {
@@ -216,7 +286,17 @@
                     { data: 'nama_bmhp', render: function(data) { return tampil(data); } },
                     { data: 'nama_section_pengguna', render: function(data) { return tampil(data); } },
                     { data: 'perawat_penerima', render: function(data) { return tampil(data); } },
-                    { data: null, render: function(data) { return tampil((data.reuse_ke_keluar || data.reuse_ke) + 'x/' + data.max_reuse + 'x'); } },
+                    { data: null, render: function(data) {
+                        var reuse = parseInt(data.reuse_ke_keluar || data.reuse_ke || 0);
+                        var max = parseInt(data.max_reuse || 0);
+                        var label = tampil(reuse + 'x/' + max + 'x');
+
+                        if (max > 0 && reuse >= max) {
+                            return '<span class="font-semibold text-amber-700">' + label + ' (Max)</span>';
+                        }
+
+                        return label;
+                    } },
                     { data: 'tanggal_steril_terakhir', render: function(data) { return tampil(data || '-'); } },
                     { data: 'tanggal_expire_steril', render: function(data) { return statusexpire(data); } },
                 ]
@@ -333,6 +413,7 @@
 
             itemdipilih = {};
             hitungdipilih();
+            updateapprovaloverreuse();
 
             if (tabelperawatkeluar) {
                 tabelperawatkeluar.ajax.reload();

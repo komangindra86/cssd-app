@@ -80,10 +80,10 @@
             <i class="fad fa-sync-alt mr-3 w-4 text-xs"></i>
             Reuse Tracking
         </a>
-        <a href="#scan-qr"
+        <a href="#scan-barcode"
             class="mb-2 flex items-center rounded px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-teal-50 hover:text-teal-700">
-            <i class="fad fa-qrcode mr-3 w-4 text-xs"></i>
-            Scan QR Alat
+            <i class="fad fa-barcode-read mr-3 w-4 text-xs"></i>
+            Scan Barcode Alat
         </a>
         <a href="#audit-trail"
             class="mb-2 flex items-center rounded px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-teal-50 hover:text-teal-700">

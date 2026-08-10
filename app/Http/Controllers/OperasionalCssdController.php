@@ -97,6 +97,12 @@ class OperasionalCssdController extends Controller
                 DB::raw('MAX(tanggal_masuk) as tanggal_penerimaan')
             )
             ->groupBy('cssd_item_id');
+        $keluarTerakhir = DB::table('cssd_keluar_logs')
+            ->select(
+                'cssd_item_id',
+                DB::raw('MAX(id) as cssd_keluar_log_id')
+            )
+            ->groupBy('cssd_item_id');
 
         $items = DB::table('cssd_items')
             ->join('master_bmhp', 'cssd_items.bmhp_id', '=', 'master_bmhp.id')
@@ -107,11 +113,28 @@ class OperasionalCssdController extends Controller
                     'cssd_items.id'
                 );
             })
+            ->leftJoinSub($keluarTerakhir, 'keluar_terakhir_id', function ($join) {
+                $join->on(
+                    'keluar_terakhir_id.cssd_item_id',
+                    '=',
+                    'cssd_items.id'
+                );
+            })
+            ->leftJoin(
+                'cssd_keluar_logs as keluar_terakhir',
+                'keluar_terakhir.id',
+                '=',
+                'keluar_terakhir_id.cssd_keluar_log_id'
+            )
             ->select(
                 'cssd_items.*',
                 'master_bmhp.nama as nama_bmhp',
                 'master_bmhp.max_reuse',
-                'penerimaan_terakhir.tanggal_penerimaan'
+                'penerimaan_terakhir.tanggal_penerimaan',
+                'keluar_terakhir.approval_over_reuse',
+                'keluar_terakhir.approval_dpjp',
+                'keluar_terakhir.approval_alasan',
+                'keluar_terakhir.approval_catatan'
             );
         $totalQuery = DB::table('cssd_items')->join(
             'master_bmhp',
@@ -134,16 +157,26 @@ class OperasionalCssdController extends Controller
         }
 
         if ($request->filled('last_unit')) {
-            $items->where(
-                'cssd_items.last_unit',
-                'like',
-                '%' . $request->last_unit . '%'
-            );
-            $totalQuery->where(
-                'cssd_items.last_unit',
-                'like',
-                '%' . $request->last_unit . '%'
-            );
+            $items->where(function ($query) use ($request) {
+                $query
+                    ->where(
+                        'cssd_items.last_unit',
+                        'like',
+                        '%' . $request->last_unit . '%'
+                    )
+                    ->orWhereNull('cssd_items.last_unit')
+                    ->orWhere('cssd_items.last_unit', '');
+            });
+            $totalQuery->where(function ($query) use ($request) {
+                $query
+                    ->where(
+                        'cssd_items.last_unit',
+                        'like',
+                        '%' . $request->last_unit . '%'
+                    )
+                    ->orWhereNull('cssd_items.last_unit')
+                    ->orWhere('cssd_items.last_unit', '');
+            });
         }
 
         $total = $totalQuery->count();
@@ -162,6 +195,11 @@ class OperasionalCssdController extends Controller
                     )
                     ->orWhere(
                         'penerimaan_terakhir.tanggal_penerimaan',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'keluar_terakhir.approval_dpjp',
                         'like',
                         '%' . $search . '%'
                     );
@@ -286,63 +324,157 @@ class OperasionalCssdController extends Controller
             ->first();
         // dd($item);
 
-        $jumlahKeluar = DB::table('cssd_keluar_logs')
-            ->where('cssd_item_id', $request->cssd_item_id)
-            ->count();
-
-        if ($item->status !== 'KELUAR' && $jumlahKeluar > 0) {
-            return response()->json(
-                [
-                    'message' =>
-                        'Item ini tidak bisa diproses barang masuk karena status sekarang ' .
-                        $item->status .
-                        '.',
-                ],
-                422
-            );
-        }
-
         $keluar = DB::table('cssd_keluar_logs')
             ->where('cssd_item_id', $request->cssd_item_id)
             ->orderByDesc('id')
             ->first();
 
-        if (!$keluar) {
-            $request->validate([
-                'tanggal_penggunaan' => 'required|date',
-                'nama_section_pengguna' => 'required|string|max:255',
-                'no_rm' => 'required|string|max:100',
-                'nama_pasien' => 'required|string|max:255',
-                'nama_dpjp' => 'required|string|max:255',
-                'nama_perawat' => 'required|string|max:255',
-            ]);
+        $sterilisasiAwal = $item && $item->status === 'DIRTY' && !$keluar;
 
-            $keluarId = DB::table('cssd_keluar_logs')->insertGetId([
+        if (!$item || ($item->status !== 'KELUAR' && !$sterilisasiAwal)) {
+            return response()->json(
+                [
+                    'message' =>
+                        'Item ini tidak bisa diproses penerimaan karena status sekarang ' .
+                        ($item->status ?? '-') .
+                        '. Penerimaan BMHP Reuse hanya untuk item DIRTY yang belum pernah dipakai atau item KELUAR yang sudah dinilai LAYAK oleh perawat.',
+                ],
+                422
+            );
+        }
+
+        if ($sterilisasiAwal) {
+            if (!$request->metode_steril) {
+                return response()->json(
+                    [
+                        'message' =>
+                            'Metode sterilisasi wajib dipilih untuk sterilisasi awal item DIRTY.',
+                    ],
+                    422
+                );
+            }
+
+            if (!$request->tanggal_steril) {
+                return response()->json(
+                    [
+                        'message' =>
+                            'Tanggal melakukan sterilisasi wajib diisi.',
+                    ],
+                    422
+                );
+            }
+
+            if (!$request->masa_expire_bulan) {
+                return response()->json(
+                    [
+                        'message' =>
+                            'Masa expire steril wajib dipilih.',
+                    ],
+                    422
+                );
+            }
+
+            if (!$petugasPengemasan || !$petugasSterilisasi) {
+                return response()->json(
+                    [
+                        'message' =>
+                            'Petugas pengemasan dan petugas sterilisasi wajib diisi.',
+                    ],
+                    422
+                );
+            }
+
+            $tanggalExpireSteril = Carbon::parse($request->tanggal_steril)
+                ->addMonthsNoOverflow((int) $request->masa_expire_bulan)
+                ->toDateString();
+            $unitAwal = $request->nama_section_pengguna ?: ($item->last_unit ?? '-');
+
+            DB::table('cssd_masuk_logs')->insert([
                 'cssd_item_id' => $request->cssd_item_id,
-                'tanggal_keluar' => $request->tanggal_penggunaan,
-                'tanggal_penggunaan' => $request->tanggal_penggunaan,
-                'nama_section_pengguna' => $request->nama_section_pengguna,
-                'no_rm' => $request->no_rm,
-                'nama_pasien' => $request->nama_pasien,
-                'nama_dpjp' => $request->nama_dpjp,
-                'nama_perawat' => $request->nama_perawat,
+                'cssd_keluar_log_id' => null,
+                'unit_asal' => $unitAwal ?: '-',
+                'tanggal_penggunaan' => null,
+                'nama_section_pengguna' => $unitAwal !== '-' ? $unitAwal : null,
+                'no_rm' => null,
+                'nama_dpjp' => null,
+                'nama_perawat' => null,
+                'tanggal_masuk' => $request->tanggal_masuk,
+                'kondisi_awal' =>
+                    $request->kondisi_awal ?: 'Sterilisasi awal item baru',
                 'petugas' => $petugasPenerimaPencucian,
-                'keterangan' =>
-                    'Input dari Barang Masuk tanpa riwayat Barang Keluar aplikasi',
+                'petugas_penerima_pencucian' => $petugasPenerimaPencucian,
+                'petugas_pengemasan' => $petugasPengemasan,
+                'petugas_sterilisasi' => $petugasSterilisasi,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
 
-            $keluar = DB::table('cssd_keluar_logs')
-                ->where('id', $keluarId)
-                ->first();
+            DB::table('cssd_items')
+                ->where('id', $request->cssd_item_id)
+                ->update([
+                    'status' => 'READY',
+                    'reuse_ke' => $item->reuse_ke,
+                    'last_unit' => $unitAwal !== '-' ? $unitAwal : null,
+                    'tanggal_steril_terakhir' => $request->tanggal_steril,
+                    'tanggal_expire_steril' => $tanggalExpireSteril,
+                    'updated_at' => now(),
+                ]);
+
+            DB::table('cssd_sterilisasi_logs')->insert([
+                'cssd_item_id' => $request->cssd_item_id,
+                'cssd_keluar_log_id' => null,
+                'metode_steril' => $request->metode_steril,
+                'tanggal_steril' => $request->tanggal_steril,
+                'masa_expire_bulan' => $request->masa_expire_bulan,
+                'tanggal_expire_steril' => $tanggalExpireSteril,
+                'petugas' => $petugasSterilisasi,
+                'keterangan' => 'Sterilisasi awal item DIRTY',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $this->simpanLog(
+                $request->cssd_item_id,
+                'STERILISASI',
+                'Sterilisasi awal metode ' .
+                    $request->metode_steril .
+                    ', expire steril ' .
+                    $tanggalExpireSteril,
+                $request->tanggal_steril,
+                $petugasSterilisasi
+            );
+
+            $this->simpanLog(
+                $request->cssd_item_id,
+                'READY',
+                'Sterilisasi awal selesai, status READY, reuse tetap ' .
+                    $item->reuse_ke,
+                $request->tanggal_masuk,
+                $petugasPenerimaPencucian
+            );
+
+            return response()->json([
+                'success' => true,
+                'status' => 'READY',
+                'reuse_ke' => $item->reuse_ke,
+                'message' =>
+                    'Sterilisasi awal berhasil. Status READY, reuse tetap ' .
+                    $item->reuse_ke .
+                    'x.',
+            ]);
         }
 
-        if (
-            $keluar &&
-            $keluar->no_rm === '-' &&
-            empty($keluar->hasil_uji_perawat)
-        ) {
+        if (!$keluar) {
+            return response()->json(
+                [
+                    'message' =>
+                        'Item ini belum memiliki riwayat Pendistribusian BMHP Reuse, jadi tidak perlu diproses di Penerimaan BMHP Reuse.',
+                ],
+                422
+            );
+        }
+
+        if (empty($keluar->hasil_uji_perawat)) {
             return response()->json(
                 [
                     'message' =>
@@ -352,7 +484,21 @@ class OperasionalCssdController extends Controller
             );
         }
 
-        if ($item->reuse_ke >= $item->max_reuse) {
+        if ($keluar->hasil_uji_perawat !== 'LAYAK') {
+            return response()->json(
+                [
+                    'message' =>
+                        'Perawat menyatakan item ini ' .
+                        $keluar->hasil_uji_perawat .
+                        ', sehingga tidak bisa diproses untuk reuse.',
+                ],
+                422
+            );
+        }
+
+        $approvalOverReuse = $this->keluarDisetujuiOverReuse($keluar);
+
+        if ($item->reuse_ke >= $item->max_reuse && !$approvalOverReuse) {
             DB::table('cssd_masuk_logs')->insert([
                 'cssd_item_id' => $request->cssd_item_id,
                 'cssd_keluar_log_id' => $keluar->id,
@@ -503,7 +649,13 @@ class OperasionalCssdController extends Controller
         $this->simpanLog(
             $request->cssd_item_id,
             'READY',
-            'Barang masuk, reuse ke-' . $reuseBaru . ', status READY',
+            'Barang masuk, reuse ke-' .
+                $reuseBaru .
+                ', status READY' .
+                ($approvalOverReuse
+                    ? ', over max reuse dengan approval DPJP ' .
+                        $keluar->approval_dpjp
+                    : ''),
             $request->tanggal_masuk,
             $petugasPenerimaPencucian
         );
@@ -512,6 +664,15 @@ class OperasionalCssdController extends Controller
             'success' => true,
             'status' => 'READY',
             'reuse_ke' => $reuseBaru,
+            'message' => $approvalOverReuse
+                ? 'Barang masuk berhasil. Status READY dengan approval over max reuse DPJP ' .
+                    $keluar->approval_dpjp .
+                    ', reuse ke-' .
+                    $reuseBaru .
+                    '.'
+                : 'Barang masuk berhasil. Status READY, reuse ke-' .
+                    $reuseBaru .
+                    '.',
         ]);
     }
 
@@ -578,12 +739,20 @@ class OperasionalCssdController extends Controller
                     ]);
                 }
 
-                if ($item->reuse_ke > $item->max_reuse) {
+                $keluarSebelumnya = DB::table('cssd_keluar_logs')
+                    ->where('cssd_item_id', $item->id)
+                    ->orderByDesc('id')
+                    ->first();
+
+                if (
+                    $item->reuse_ke >= $item->max_reuse &&
+                    !$this->keluarDisetujuiOverReuse($keluarSebelumnya)
+                ) {
                     throw ValidationException::withMessages([
                         'cssd_item_ids' =>
                             'Item ' .
                             $item->kode_unik .
-                            ' sudah melewati max reuse dan tidak boleh keluar.',
+                            ' sudah mencapai max reuse. Input approval over max reuse di menu Input Kelayakan Alat terlebih dahulu jika akan digunakan ulang.',
                     ]);
                 }
 
@@ -613,13 +782,25 @@ class OperasionalCssdController extends Controller
                         'updated_at' => now(),
                     ]);
 
+                $keteranganKeluar =
+                    'Keluar ke ' .
+                    $request->nama_section_pengguna .
+                    ', diterima oleh ' .
+                    $request->perawat_penerima;
+
+                if (
+                    $item->reuse_ke >= $item->max_reuse &&
+                    $this->keluarDisetujuiOverReuse($keluarSebelumnya)
+                ) {
+                    $keteranganKeluar .=
+                        ', over max reuse dengan approval DPJP ' .
+                        $keluarSebelumnya->approval_dpjp;
+                }
+
                 $this->simpanLog(
                     $item->id,
                     'KELUAR',
-                    'Keluar ke ' .
-                        $request->nama_section_pengguna .
-                        ', diterima oleh ' .
-                        $request->perawat_penerima,
+                    $keteranganKeluar,
                     $request->tanggal_keluar,
                     $request->petugas
                 );
@@ -632,6 +813,175 @@ class OperasionalCssdController extends Controller
             'success' => true,
             'jumlah' => $jumlah,
         ]);
+    }
+
+    public function keluarTidakLayak(Request $request)
+    {
+        $request->validate([
+            'cssd_item_ids' => 'required_without:cssd_item_id|array',
+            'cssd_item_ids.*' => 'exists:cssd_items,id',
+            'cssd_item_id' => 'required_without:cssd_item_ids|exists:cssd_items,id',
+            'tanggal_uji' => 'required|date',
+            'petugas' => 'required|string|max:255',
+            'catatan' => 'required|string',
+        ]);
+
+        $itemIds = $request->input('cssd_item_ids', []);
+
+        if (!is_array($itemIds)) {
+            $itemIds = [];
+        }
+
+        if (empty($itemIds) && $request->filled('cssd_item_id')) {
+            $itemIds = [$request->cssd_item_id];
+        }
+
+        $itemIds = collect($itemIds)
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($itemIds->isEmpty()) {
+            return response()->json(
+                ['message' => 'Pilih minimal satu item READY.'],
+                422
+            );
+        }
+
+        $jumlah = DB::transaction(function () use ($request, $itemIds) {
+            foreach ($itemIds as $itemId) {
+                $item = DB::table('cssd_items')
+                    ->join(
+                        'master_bmhp',
+                        'cssd_items.bmhp_id',
+                        '=',
+                        'master_bmhp.id'
+                    )
+                    ->select(
+                        'cssd_items.*',
+                        'master_bmhp.nama as nama_bmhp'
+                    )
+                    ->where('cssd_items.id', $itemId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$item || $item->status !== 'READY') {
+                    throw ValidationException::withMessages([
+                        'cssd_item_ids' =>
+                            'Item ' .
+                            ($item->kode_unik ?? $itemId) .
+                            ' tidak bisa ditandai tidak layak karena status sekarang ' .
+                            ($item->status ?? '-') .
+                            '.',
+                    ]);
+                }
+
+                DB::table('cssd_ujis')->insert([
+                    'cssd_item_id' => $item->id,
+                    'cssd_keluar_log_id' => null,
+                    'visual_ok' => false,
+                    'fungsi_ok' => false,
+                    'kriteria_rusak' => json_encode([]),
+                    'catatan' => $request->catatan,
+                    'hasil' => 'TIDAK LAYAK',
+                    'reuse_ke' => $item->reuse_ke,
+                    'tanggal_uji' => $request->tanggal_uji,
+                    'petugas' => $request->petugas,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+                DB::table('cssd_items')
+                    ->where('id', $item->id)
+                    ->update([
+                        'status' => 'DISPOSE',
+                        'updated_at' => now(),
+                    ]);
+
+                $this->simpanLog(
+                    $item->id,
+                    'DISPOSE',
+                    'CSSD menyatakan alat tidak layak saat persiapan distribusi. Catatan: ' .
+                        $request->catatan,
+                    $request->tanggal_uji,
+                    $request->petugas
+                );
+            }
+
+            return $itemIds->count();
+        });
+
+        return response()->json([
+            'success' => true,
+            'jumlah' => $jumlah,
+            'message' =>
+                $jumlah .
+                ' item berhasil dipindahkan ke DISPOSE / STOP PENGGUNAAN.',
+        ]);
+    }
+
+    public function distribusiData(Request $request)
+    {
+        $logs = DB::table('cssd_keluar_logs as keluar')
+            ->join(
+                'cssd_items as item',
+                'keluar.cssd_item_id',
+                '=',
+                'item.id'
+            )
+            ->join('master_bmhp as bmhp', 'item.bmhp_id', '=', 'bmhp.id')
+            ->select(
+                'keluar.id',
+                'keluar.tanggal_keluar',
+                'keluar.jam_keluar',
+                'keluar.nama_section_pengguna',
+                'keluar.petugas',
+                'keluar.perawat_penerima',
+                'keluar.keterangan',
+                'item.kode_unik',
+                'item.status',
+                'bmhp.nama as nama_bmhp'
+            );
+
+        $total = $this->countForDataTable(clone $logs);
+        $search = $this->searchValue($request);
+
+        if ($search !== '') {
+            $logs->where(function ($query) use ($search) {
+                $query
+                    ->where('keluar.tanggal_keluar', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.jam_keluar', 'like', '%' . $search . '%')
+                    ->orWhere('item.kode_unik', 'like', '%' . $search . '%')
+                    ->orWhere('bmhp.nama', 'like', '%' . $search . '%')
+                    ->orWhere('item.status', 'like', '%' . $search . '%')
+                    ->orWhere(
+                        'keluar.nama_section_pengguna',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere('keluar.petugas', 'like', '%' . $search . '%')
+                    ->orWhere(
+                        'keluar.perawat_penerima',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'keluar.keterangan',
+                        'like',
+                        '%' . $search . '%'
+                    );
+            });
+        }
+
+        $logs->orderByDesc('keluar.tanggal_keluar')
+            ->orderByDesc('keluar.jam_keluar')
+            ->orderByDesc('keluar.id');
+
+        if ($request->filled('draw')) {
+            return $this->dataTableResponse($logs, $request, null, $total);
+        }
+
+        return response()->json($logs->get());
     }
 
     public function keluarData(Request $request)
@@ -730,6 +1080,115 @@ class OperasionalCssdController extends Controller
         return response()->json($logs->get());
     }
 
+    public function perawatSelesaiData(Request $request)
+    {
+        $logs = DB::table('cssd_keluar_logs as keluar')
+            ->join(
+                'cssd_items as item',
+                'keluar.cssd_item_id',
+                '=',
+                'item.id'
+            )
+            ->join('master_bmhp as bmhp', 'item.bmhp_id', '=', 'bmhp.id')
+            ->where('item.status', 'KELUAR')
+            ->where('keluar.hasil_uji_perawat', 'LAYAK')
+            ->select(
+                'keluar.id as cssd_keluar_log_id',
+                'keluar.cssd_item_id',
+                'keluar.tanggal_keluar',
+                'keluar.jam_keluar',
+                'keluar.tanggal_penggunaan',
+                'keluar.jam_penggunaan',
+                'keluar.tanggal_uji_perawat',
+                'keluar.jam_uji_perawat',
+                'keluar.nama_section_pengguna',
+                'keluar.no_rm',
+                'keluar.nama_pasien',
+                'keluar.nama_dpjp',
+                'keluar.nama_perawat',
+                'keluar.petugas',
+                'keluar.perawat_penerima',
+                'keluar.hasil_uji_perawat',
+                'keluar.reuse_ke_keluar',
+                'keluar.approval_over_reuse',
+                'keluar.approval_dpjp',
+                'keluar.approval_alasan',
+                'keluar.approval_catatan',
+                'item.kode_unik',
+                'item.reuse_ke',
+                'item.last_unit',
+                'item.tanggal_steril_terakhir',
+                'item.tanggal_expire_steril',
+                'bmhp.nama as nama_bmhp',
+                'bmhp.max_reuse'
+            );
+
+        if ($request->filled('nama_section_pengguna')) {
+            $logs->where(
+                'keluar.nama_section_pengguna',
+                'like',
+                '%' . $request->nama_section_pengguna . '%'
+            );
+        }
+
+        $total = $this->countForDataTable(clone $logs);
+        $search = $this->searchValue($request);
+
+        if ($search !== '') {
+            $logs->where(function ($query) use ($search) {
+                $query
+                    ->where('item.kode_unik', 'like', '%' . $search . '%')
+                    ->orWhere('bmhp.nama', 'like', '%' . $search . '%')
+                    ->orWhere(
+                        'keluar.nama_section_pengguna',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
+                    ->orWhere(
+                        'keluar.nama_pasien',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'keluar.nama_dpjp',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'keluar.nama_perawat',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'keluar.perawat_penerima',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'keluar.approval_dpjp',
+                        'like',
+                        '%' . $search . '%'
+                    )
+                    ->orWhere(
+                        'keluar.approval_alasan',
+                        'like',
+                        '%' . $search . '%'
+                    );
+            });
+        }
+
+        $logs->orderByDesc('keluar.tanggal_uji_perawat')
+            ->orderByDesc('keluar.jam_uji_perawat')
+            ->orderByDesc('keluar.id');
+
+        if ($request->filled('draw')) {
+            return $this->dataTableResponse($logs, $request, null, $total);
+        }
+
+        return response()->json($logs->get());
+    }
+
     public function perawatSimpan(Request $request)
     {
         $request->validate([
@@ -746,6 +1205,10 @@ class OperasionalCssdController extends Controller
                 'required',
                 Rule::in(['LAYAK', 'TIDAK LAYAK']),
             ],
+            'approval_over_reuse' => 'nullable|boolean',
+            'approval_dpjp' => 'nullable|string|max:255',
+            'approval_alasan' => 'nullable|string',
+            'approval_catatan' => 'nullable|string',
             'kriteria_rusak' => 'nullable|array',
             'catatan' => 'nullable|string',
         ]);
@@ -760,6 +1223,22 @@ class OperasionalCssdController extends Controller
                 ['message' => 'Pilih minimal satu item alat.'],
                 422
             );
+        }
+
+        $approvalOverReuse = $request->boolean('approval_over_reuse');
+
+        if ($approvalOverReuse && $request->hasil_uji_perawat !== 'LAYAK') {
+            throw ValidationException::withMessages([
+                'approval_over_reuse' =>
+                    'Approval over max reuse hanya boleh dicatat jika hasil kelayakan LAYAK.',
+            ]);
+        }
+
+        if ($approvalOverReuse) {
+            $request->validate([
+                'approval_dpjp' => 'required|string|max:255',
+                'approval_alasan' => 'required|string',
+            ]);
         }
 
         $jumlah = DB::transaction(function () use ($request, $logIds) {
@@ -799,6 +1278,17 @@ class OperasionalCssdController extends Controller
                 $layak = $hasil === 'LAYAK';
                 $reuseKe = $keluar->reuse_ke_keluar
                     ?: ((int) $keluar->reuse_ke) + 1;
+                $butuhApproval = $layak && $reuseKe >= (int) $keluar->max_reuse;
+                $approvalBerlaku = $butuhApproval && $request->boolean('approval_over_reuse');
+
+                if ($butuhApproval && !$approvalBerlaku) {
+                    throw ValidationException::withMessages([
+                        'approval_over_reuse' =>
+                            'Item ' .
+                            $keluar->kode_unik .
+                            ' sudah mencapai batas maksimal reuse. Centang approval over max reuse dan isi detail DPJP/ruangan jika tetap akan direuse.',
+                    ]);
+                }
 
                 DB::table('cssd_keluar_logs')
                     ->where('id', $keluar->id)
@@ -815,6 +1305,16 @@ class OperasionalCssdController extends Controller
                         'hasil_uji_perawat' => $hasil,
                         'catatan_uji_perawat' => $request->catatan,
                         'reuse_ke_keluar' => $reuseKe,
+                        'approval_over_reuse' => $approvalBerlaku,
+                        'approval_dpjp' => $approvalBerlaku
+                            ? $request->approval_dpjp
+                            : null,
+                        'approval_alasan' => $approvalBerlaku
+                            ? $request->approval_alasan
+                            : null,
+                        'approval_catatan' => $approvalBerlaku
+                            ? $request->approval_catatan
+                            : null,
                         'updated_at' => now(),
                     ]);
 
@@ -853,10 +1353,21 @@ class OperasionalCssdController extends Controller
                         $request->nama_perawat
                     );
                 } else {
+                    $keterangan =
+                        'Perawat menyatakan alat masih layak digunakan ulang setelah dipakai pasien';
+
+                    if ($approvalBerlaku) {
+                        $keterangan .=
+                            '. Approval over max reuse oleh DPJP ' .
+                            $request->approval_dpjp .
+                            '. Alasan: ' .
+                            $request->approval_alasan;
+                    }
+
                     $this->simpanLog(
                         $keluar->cssd_item_id,
                         'UJI_PERAWAT',
-                        'Perawat menyatakan alat masih layak digunakan ulang setelah dipakai pasien',
+                        $keterangan,
                         $request->tanggal_penggunaan,
                         $request->nama_perawat
                     );
@@ -1050,6 +1561,13 @@ class OperasionalCssdController extends Controller
         }
 
         return $search ?? '';
+    }
+
+    private function keluarDisetujuiOverReuse($keluar): bool
+    {
+        return $keluar &&
+            (int) ($keluar->approval_over_reuse ?? 0) === 1 &&
+            ($keluar->hasil_uji_perawat ?? null) === 'LAYAK';
     }
 
     private function dataTableResponse(

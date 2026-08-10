@@ -60,6 +60,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/masuk-cssd/simpan', [OperasionalCssdController::class, 'masukSimpan']);
         Route::get('/barang-keluar', [OperasionalCssdController::class, 'keluar'])->name('barang-keluar');
         Route::post('/barang-keluar/simpan', [OperasionalCssdController::class, 'keluarSimpan']);
+        Route::post('/barang-keluar/tidak-layak', [OperasionalCssdController::class, 'keluarTidakLayak']);
         Route::get('/labeling', [OperasionalCssdController::class, 'labeling'])->name('labeling');
         Route::get('/ready', [OperasionalCssdController::class, 'ready'])->name('ready');
         Route::get('/dispose', [OperasionalCssdController::class, 'dispose'])->name('dispose');
@@ -74,6 +75,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/operasional/item-data', [OperasionalCssdController::class, 'itemData']);
         Route::get('/operasional/item/{id}', [OperasionalCssdController::class, 'item']);
         Route::get('/operasional/item-kode/{kode}', [OperasionalCssdController::class, 'itemByKode']);
+        Route::get('/operasional/perawat-selesai-data', [OperasionalCssdController::class, 'perawatSelesaiData']);
+        Route::get('/operasional/distribusi-data', [OperasionalCssdController::class, 'distribusiData']);
         Route::get('/operasional/log-data', [OperasionalCssdController::class, 'logData']);
     });
 

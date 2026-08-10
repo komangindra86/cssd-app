@@ -242,8 +242,8 @@
         }
 
         function getunit() {
-            $.get('/item-alat/get-unit', function(data) {
-                daftarunit = data.units || [];
+            $.get('/operasional/get-ruangan', function(data) {
+                daftarunit = data.ruangan || [];
                 renderdropdownunit(null, false);
             }).fail(function() {
                 daftarunit = [];
