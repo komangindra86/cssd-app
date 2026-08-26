@@ -298,6 +298,57 @@
             tutupdropdownunit();
         }
 
+        function pesanerror(xhr) {
+            if (xhr.responseJSON) {
+                if (xhr.responseJSON.errors) {
+                    var pesan = [];
+
+                    Object.keys(xhr.responseJSON.errors).forEach(function(key) {
+                        var isi = xhr.responseJSON.errors[key];
+
+                        if (Array.isArray(isi)) {
+                            pesan.push(isi[0]);
+                        } else if (isi) {
+                            pesan.push(isi);
+                        }
+                    });
+
+                    if (pesan.length > 0) {
+                        return pesan.join('\n');
+                    }
+                }
+
+                if (xhr.responseJSON.message) {
+                    return xhr.responseJSON.message;
+                }
+            }
+
+            return xhr.responseText || 'Terjadi kesalahan.';
+        }
+
+        function tampilkanerrorvalidasi(xhr) {
+            if (!xhr.responseJSON || !xhr.responseJSON.errors) {
+                return;
+            }
+
+            var target = {
+                bmhp_id: '#bmhpid',
+                kode_unik: '#kodeunik',
+                reuse_ke: '#reuseke',
+                status: '#status',
+                last_unit: '#lastunit'
+            };
+
+            Object.keys(xhr.responseJSON.errors).forEach(function(key) {
+                var selector = target[key];
+                var pesan = xhr.responseJSON.errors[key][0] || '';
+
+                if (selector) {
+                    $(selector).after('<span class="error-message text-red-500">' + tampil(pesan) + '</span>');
+                }
+            });
+        }
+
         function setitemalat(id) {
             $.get(`/item-alat/get/${id}`, function(data) {
                 $("#itemalatid").val(id);
@@ -341,7 +392,9 @@
                     $("#itemalatid").val('');
                 },
                 error: function(xhr) {
-                    alert("Terjadi kesalahan: " + xhr.responseText);
+                    $(".error-message").remove();
+                    tampilkanerrorvalidasi(xhr);
+                    alert("Terjadi kesalahan:\n" + pesanerror(xhr));
                 }
             });
         }
@@ -363,7 +416,9 @@
                     kosong();
                 },
                 error: function(xhr) {
-                    alert("Terjadi kesalahan: " + xhr.responseText);
+                    $(".error-message").remove();
+                    tampilkanerrorvalidasi(xhr);
+                    alert("Terjadi kesalahan:\n" + pesanerror(xhr));
                 }
             });
         }
@@ -385,7 +440,7 @@
                     $("#editButton").hide();
                 },
                 error: function(xhr) {
-                    alert("Terjadi kesalahan: " + xhr.responseText);
+                    alert("Terjadi kesalahan:\n" + pesanerror(xhr));
                 }
             });
         }

@@ -150,7 +150,7 @@ class ItemAlatController extends Controller
             'reuse_ke' => 'required|integer|min:0|max:100',
             'status' => ['required', Rule::in(['DIRTY', 'READY', 'EXPIRED', 'DISPOSE'])],
             'last_unit' => 'nullable|string|max:255',
-        ]);
+        ], $this->pesanValidasi());
 
         $id = DB::table('cssd_items')->insertGetId([
             'bmhp_id' => $request->bmhp_id,
@@ -207,7 +207,7 @@ class ItemAlatController extends Controller
             'reuse_ke' => 'required|integer|min:0|max:100',
             'status' => ['required', Rule::in(['DIRTY', 'READY', 'EXPIRED', 'DISPOSE'])],
             'last_unit' => 'nullable|string|max:255',
-        ]);
+        ], $this->pesanValidasi());
 
         $item = DB::table('cssd_items')
             ->where('id', $id)
@@ -295,6 +295,24 @@ class ItemAlatController extends Controller
         }
 
         return $search ?? '';
+    }
+
+    private function pesanValidasi()
+    {
+        return [
+            'bmhp_id.required' => 'Master BMHP wajib dipilih.',
+            'bmhp_id.exists' => 'Master BMHP tidak ditemukan.',
+            'kode_unik.required' => 'Kode unik wajib diisi.',
+            'kode_unik.max' => 'Kode unik maksimal 100 karakter.',
+            'kode_unik.unique' => 'Kode unik sudah terdaftar. Gunakan kode lain.',
+            'reuse_ke.required' => 'Reuse ke wajib diisi.',
+            'reuse_ke.integer' => 'Reuse ke harus berupa angka.',
+            'reuse_ke.min' => 'Reuse ke minimal 0.',
+            'reuse_ke.max' => 'Reuse ke maksimal 100.',
+            'status.required' => 'Status wajib dipilih.',
+            'status.in' => 'Status tidak valid.',
+            'last_unit.max' => 'Ruangan maksimal 255 karakter.',
+        ];
     }
 
     private function formatHeader($name, $value)
