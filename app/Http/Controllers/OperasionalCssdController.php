@@ -103,6 +103,12 @@ class OperasionalCssdController extends Controller
                 DB::raw('MAX(id) as cssd_keluar_log_id')
             )
             ->groupBy('cssd_item_id');
+        $jumlahKeluar = DB::table('cssd_keluar_logs')
+            ->select(
+                'cssd_item_id',
+                DB::raw('COUNT(*) as jumlah_keluar')
+            )
+            ->groupBy('cssd_item_id');
 
         $items = DB::table('cssd_items')
             ->join('master_bmhp', 'cssd_items.bmhp_id', '=', 'master_bmhp.id')
@@ -126,11 +132,19 @@ class OperasionalCssdController extends Controller
                 '=',
                 'keluar_terakhir_id.cssd_keluar_log_id'
             )
+            ->leftJoinSub($jumlahKeluar, 'jumlah_keluar', function ($join) {
+                $join->on(
+                    'jumlah_keluar.cssd_item_id',
+                    '=',
+                    'cssd_items.id'
+                );
+            })
             ->select(
                 'cssd_items.*',
                 'master_bmhp.nama as nama_bmhp',
                 'master_bmhp.max_reuse',
                 'penerimaan_terakhir.tanggal_penerimaan',
+                DB::raw('COALESCE(jumlah_keluar.jumlah_keluar, 0) as jumlah_keluar'),
                 'keluar_terakhir.approval_over_reuse',
                 'keluar_terakhir.approval_dpjp',
                 'keluar_terakhir.approval_alasan',
@@ -743,9 +757,14 @@ class OperasionalCssdController extends Controller
                     ->where('cssd_item_id', $item->id)
                     ->orderByDesc('id')
                     ->first();
+                $maxReuseTercapai =
+                    (int) $item->max_reuse > 0 &&
+                    (int) $item->reuse_ke >= (int) $item->max_reuse;
+                $dataAwalOverReuse = $maxReuseTercapai && !$keluarSebelumnya;
 
                 if (
-                    $item->reuse_ke >= $item->max_reuse &&
+                    $maxReuseTercapai &&
+                    !$dataAwalOverReuse &&
                     !$this->keluarDisetujuiOverReuse($keluarSebelumnya)
                 ) {
                     throw ValidationException::withMessages([
@@ -789,12 +808,17 @@ class OperasionalCssdController extends Controller
                     $request->perawat_penerima;
 
                 if (
-                    $item->reuse_ke >= $item->max_reuse &&
+                    $maxReuseTercapai &&
                     $this->keluarDisetujuiOverReuse($keluarSebelumnya)
                 ) {
                     $keteranganKeluar .=
                         ', over max reuse dengan approval DPJP ' .
                         $keluarSebelumnya->approval_dpjp;
+                }
+
+                if ($dataAwalOverReuse) {
+                    $keteranganKeluar .=
+                        ', data awal aplikasi sudah mencapai/melebihi max reuse; wajib approval DPJP/ruangan saat Input Kelayakan Alat jika masih LAYAK';
                 }
 
                 $this->simpanLog(

@@ -213,6 +213,10 @@
                             return tampil('Over max: ' + (data.approval_dpjp || '-'));
                         }
 
+                        if (sudahmax && parseInt(data.jumlah_keluar || 0) === 0) {
+                            return '<span class="text-xs font-semibold text-amber-700">Data awal - wajib approval perawat</span>';
+                        }
+
                         if (sudahmax) {
                             return '<span class="text-xs font-semibold text-red-600">Butuh approval</span>';
                         }
