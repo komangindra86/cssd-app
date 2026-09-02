@@ -55,7 +55,7 @@
                 </div>
                 <div id="boxapprovaloverreuse" class="hidden rounded border border-amber-200 bg-amber-50 p-4 lg:col-span-3">
                     <div class="mb-3 text-xs text-amber-800">
-                        Item yang dipilih sudah mencapai batas maksimal reuse. Jika alat tetap dinyatakan LAYAK dan akan digunakan ulang, approval DPJP/ruangan wajib dicatat.
+                        Item yang dipilih sudah melebihi batas maksimal reuse. Jika alat tetap dinyatakan LAYAK dan akan digunakan ulang, approval DPJP/ruangan wajib dicatat.
                     </div>
                     <label class="mb-3 flex items-start gap-2 text-sm font-medium text-slate-700">
                         <input type="checkbox" id="approvaloverreuse" value="1" class="mt-1">
@@ -234,7 +234,7 @@
                 var reuse = parseInt(item.reuse_ke_keluar || item.reuse_ke || 0);
                 var max = parseInt(item.max_reuse || 0);
 
-                return max > 0 && reuse >= max;
+                return max > 0 && reuse > max;
             });
         }
 
@@ -291,8 +291,8 @@
                         var max = parseInt(data.max_reuse || 0);
                         var label = tampil(reuse + 'x/' + max + 'x');
 
-                        if (max > 0 && reuse >= max) {
-                            return '<span class="font-semibold text-amber-700">' + label + ' (Max)</span>';
+                        if (max > 0 && reuse > max) {
+                            return '<span class="font-semibold text-amber-700">' + label + ' (Over Max)</span>';
                         }
 
                         return label;

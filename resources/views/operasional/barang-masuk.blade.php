@@ -236,7 +236,7 @@
                     return;
                 }
 
-                if (parseInt(item.reuse_ke) >= parseInt(item.max_reuse)) {
+                if (parseInt(item.max_reuse || 0) > 0 && parseInt(item.reuse_ke || 0) >= parseInt(item.max_reuse || 0)) {
                     $("#cssditemid").val(item.id);
                     $("#punyariwayatkeluar").val(parseInt(item.jumlah_keluar) > 0 ? '1' : '0');
                     $("#prosesawal").val('0');
@@ -383,8 +383,8 @@
                         var max = parseInt(data.max_reuse || 0);
                         var label = tampil(reuse + 'x/' + max + 'x');
 
-                        if (max > 0 && reuse >= max) {
-                            return '<span class="font-semibold text-amber-700">' + label + ' (Max)</span>';
+                        if (max > 0 && reuse > max) {
+                            return '<span class="font-semibold text-amber-700">' + label + ' (Over Max)</span>';
                         }
 
                         return label;

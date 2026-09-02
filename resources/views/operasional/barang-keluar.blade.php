@@ -207,18 +207,20 @@
                     { data: 'reuse_ke', render: function(data) { return tampil(data + 'x'); } },
                     { data: 'max_reuse', render: function(data) { return tampil(data + 'x'); } },
                     { data: null, render: function(data) {
-                        var sudahmax = parseInt(data.reuse_ke || 0) >= parseInt(data.max_reuse || 0);
+                        var reuse = parseInt(data.reuse_ke || 0);
+                        var max = parseInt(data.max_reuse || 0);
+                        var akanover = max > 0 && (reuse + 1) > max;
 
                         if (parseInt(data.approval_over_reuse || 0) === 1) {
                             return tampil('Over max: ' + (data.approval_dpjp || '-'));
                         }
 
-                        if (sudahmax && parseInt(data.jumlah_keluar || 0) === 0) {
-                            return '<span class="text-xs font-semibold text-amber-700">Data awal - wajib approval perawat</span>';
+                        if (akanover && parseInt(data.jumlah_keluar || 0) === 0) {
+                            return '<span class="text-xs font-semibold text-amber-700">Data awal - approval saat input perawat</span>';
                         }
 
-                        if (sudahmax) {
-                            return '<span class="text-xs font-semibold text-red-600">Butuh approval</span>';
+                        if (akanover) {
+                            return '<span class="text-xs font-semibold text-amber-700">Reuse berikutnya over max</span>';
                         }
 
                         return '-';

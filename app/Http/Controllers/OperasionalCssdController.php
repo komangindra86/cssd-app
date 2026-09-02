@@ -512,7 +512,11 @@ class OperasionalCssdController extends Controller
 
         $approvalOverReuse = $this->keluarDisetujuiOverReuse($keluar);
 
-        if ($item->reuse_ke >= $item->max_reuse && !$approvalOverReuse) {
+        if (
+            (int) $item->max_reuse > 0 &&
+            (int) $item->reuse_ke >= (int) $item->max_reuse &&
+            !$approvalOverReuse
+        ) {
             DB::table('cssd_masuk_logs')->insert([
                 'cssd_item_id' => $request->cssd_item_id,
                 'cssd_keluar_log_id' => $keluar->id,
@@ -757,23 +761,11 @@ class OperasionalCssdController extends Controller
                     ->where('cssd_item_id', $item->id)
                     ->orderByDesc('id')
                     ->first();
-                $maxReuseTercapai =
+                $reuseKeKeluar = ((int) $item->reuse_ke) + 1;
+                $akanOverReuse =
                     (int) $item->max_reuse > 0 &&
-                    (int) $item->reuse_ke >= (int) $item->max_reuse;
-                $dataAwalOverReuse = $maxReuseTercapai && !$keluarSebelumnya;
-
-                if (
-                    $maxReuseTercapai &&
-                    !$dataAwalOverReuse &&
-                    !$this->keluarDisetujuiOverReuse($keluarSebelumnya)
-                ) {
-                    throw ValidationException::withMessages([
-                        'cssd_item_ids' =>
-                            'Item ' .
-                            $item->kode_unik .
-                            ' sudah mencapai max reuse. Input approval over max reuse di menu Input Kelayakan Alat terlebih dahulu jika akan digunakan ulang.',
-                    ]);
-                }
+                    $reuseKeKeluar > (int) $item->max_reuse;
+                $dataAwalOverReuse = $akanOverReuse && !$keluarSebelumnya;
 
                 DB::table('cssd_keluar_logs')->insert([
                     'cssd_item_id' => $item->id,
@@ -787,7 +779,7 @@ class OperasionalCssdController extends Controller
                     'nama_perawat' => '-',
                     'petugas' => $request->petugas,
                     'perawat_penerima' => $request->perawat_penerima,
-                    'reuse_ke_keluar' => ((int) $item->reuse_ke) + 1,
+                    'reuse_ke_keluar' => $reuseKeKeluar,
                     'keterangan' => $request->keterangan,
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -807,18 +799,16 @@ class OperasionalCssdController extends Controller
                     ', diterima oleh ' .
                     $request->perawat_penerima;
 
-                if (
-                    $maxReuseTercapai &&
-                    $this->keluarDisetujuiOverReuse($keluarSebelumnya)
-                ) {
-                    $keteranganKeluar .=
-                        ', over max reuse dengan approval DPJP ' .
-                        $keluarSebelumnya->approval_dpjp;
-                }
-
                 if ($dataAwalOverReuse) {
                     $keteranganKeluar .=
-                        ', data awal aplikasi sudah mencapai/melebihi max reuse; wajib approval DPJP/ruangan saat Input Kelayakan Alat jika masih LAYAK';
+                        ', data awal aplikasi sudah melebihi max reuse; wajib approval DPJP/ruangan saat Input Kelayakan Alat jika masih LAYAK';
+                } elseif ($akanOverReuse) {
+                    $keteranganKeluar .=
+                        ', akan digunakan reuse ke-' .
+                        $reuseKeKeluar .
+                        ' melebihi batas maksimal ' .
+                        $item->max_reuse .
+                        'x; wajib approval DPJP/ruangan saat Input Kelayakan Alat jika masih LAYAK';
                 }
 
                 $this->simpanLog(
@@ -1302,7 +1292,8 @@ class OperasionalCssdController extends Controller
                 $layak = $hasil === 'LAYAK';
                 $reuseKe = $keluar->reuse_ke_keluar
                     ?: ((int) $keluar->reuse_ke) + 1;
-                $butuhApproval = $layak && $reuseKe >= (int) $keluar->max_reuse;
+                $maxReuse = (int) $keluar->max_reuse;
+                $butuhApproval = $layak && $maxReuse > 0 && $reuseKe > $maxReuse;
                 $approvalBerlaku = $butuhApproval && $request->boolean('approval_over_reuse');
 
                 if ($butuhApproval && !$approvalBerlaku) {
@@ -1310,7 +1301,7 @@ class OperasionalCssdController extends Controller
                         'approval_over_reuse' =>
                             'Item ' .
                             $keluar->kode_unik .
-                            ' sudah mencapai batas maksimal reuse. Centang approval over max reuse dan isi detail DPJP/ruangan jika tetap akan direuse.',
+                            ' sudah melebihi batas maksimal reuse. Centang approval over max reuse dan isi detail DPJP/ruangan jika tetap akan direuse.',
                     ]);
                 }
 
