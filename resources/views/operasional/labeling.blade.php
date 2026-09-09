@@ -37,57 +37,58 @@
 @endsection
 
 @push('styles')
-    <style>
+    <style id="labelstyles">
         .label-print {
             width: 45mm;
             height: 20mm;
             display: flex;
             flex-direction: column;
             justify-content: center;
-            gap: 0.6mm;
+            gap: 0.4mm;
             overflow: hidden;
-            padding: 1.1mm 1.4mm;
+            padding: 0.7mm 1mm;
             border: 0.2mm solid #111827;
             background: #ffffff;
             box-sizing: border-box;
             font-family: Arial, sans-serif;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0;
         }
 
         .barcode-label {
-            width: 42mm;
-            height: 8mm;
+            width: 100%;
+            height: 7mm;
             flex: none;
         }
 
         .barcode-label svg {
-            width: 42mm !important;
-            height: 8mm !important;
+            width: 100% !important;
+            height: 7mm !important;
             display: block;
         }
 
         .label-info {
-            width: 42mm;
+            width: 100%;
             min-width: 0;
-            font-size: 4.7pt;
-            line-height: 1.05;
+            flex: none;
+            font-size: 6.5pt;
+            line-height: 1.1;
             color: #111827;
         }
 
         .label-info h2 {
-            margin: 0 0 0.3mm;
-            font-size: 6.2pt;
-            line-height: 1;
+            margin: 0 0 0.2mm;
+            font-size: 1.23em;
+            line-height: 1.05;
             font-weight: 700;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            overflow-wrap: anywhere;
         }
 
         .label-detail {
             margin: 0;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            white-space: normal;
+            overflow-wrap: anywhere;
         }
 
         .label-detail span + span::before {
@@ -186,6 +187,22 @@
             $("#barcode-" + id).html(barcodeSvg(kode));
         }
 
+        function sesuaikanLabel(id) {
+            var label = document.getElementById('label-' + id);
+            var info = label.querySelector('.label-info');
+            var style = window.getComputedStyle(label);
+            var tinggiTeks = label.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+                - parseFloat(style.rowGap) - label.querySelector('.barcode-label').getBoundingClientRect().height;
+            var ukuran = 6.5;
+
+            // Sesuaikan teks panjang dengan ruang cetak tanpa memotong keterangannya.
+            info.style.fontSize = ukuran + 'pt';
+            while (info.getBoundingClientRect().height > tinggiTeks && ukuran > 1) {
+                ukuran -= 0.25;
+                info.style.fontSize = ukuran + 'pt';
+            }
+        }
+
         function renderPagination(response) {
             var area = $("#paginationlabel");
             area.empty();
@@ -235,6 +252,7 @@
                     `);
 
                     renderBarcode(item.id, item.kode_unik);
+                    sesuaikanLabel(item.id);
                 });
 
                 $("#infolabel").text(`Menampilkan ${response.from ?? 0} - ${response.to ?? 0} dari ${response.total} data`);
@@ -243,13 +261,14 @@
         }
 
         function cetaklabel(id) {
+            sesuaikanLabel(id);
             var barcode = document.querySelector('#barcode-' + id);
             var barcodeHtml = barcode ? barcode.innerHTML : '';
-            var info = document.querySelector('#label-' + id + ' .label-info').innerHTML;
+            var info = document.querySelector('#label-' + id + ' .label-info').outerHTML;
             var isi = `
                 <div class="label-print">
                     <div class="barcode-label">${barcodeHtml}</div>
-                    <div class="label-info">${info}</div>
+                    ${info}
                 </div>
             `;
             var win = window.open('', '_blank');
@@ -272,53 +291,7 @@
                             align-items: center;
                             justify-content: center;
                         }
-                        .label-print {
-                            width: 45mm;
-                            height: 20mm;
-                            display: flex;
-                            flex-direction: column;
-                            justify-content: center;
-                            gap: 0.6mm;
-                            overflow: hidden;
-                            padding: 1.1mm 1.4mm;
-                            border: 0.2mm solid #111827;
-                        }
-                        .barcode-label {
-                            width: 42mm;
-                            height: 8mm;
-                            flex: none;
-                        }
-                        .barcode-label svg {
-                            width: 42mm !important;
-                            height: 8mm !important;
-                            display: block;
-                        }
-                        .label-info {
-                            width: 42mm;
-                            min-width: 0;
-                            font-size: 4.7pt;
-                            line-height: 1.05;
-                            color: #111827;
-                        }
-                        .label-info h2 {
-                            margin: 0 0 0.3mm;
-                            font-size: 6.2pt;
-                            line-height: 1;
-                            font-weight: 700;
-                            white-space: nowrap;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                        }
-                        .label-detail {
-                            margin: 0;
-                            white-space: nowrap;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                        }
-                        .label-detail span + span::before {
-                            content: " | ";
-                            font-weight: 700;
-                        }
+                        ${document.getElementById('labelstyles').textContent}
                     </style>
                 </head>
                 <body>${isi}</body>
