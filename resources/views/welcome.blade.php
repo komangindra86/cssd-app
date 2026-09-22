@@ -7,7 +7,16 @@
         <div class="mb-6">
             <h1 class="text-2xl font-bold text-slate-800">Dashboard Monitoring</h1>
             <p class="mt-1 text-sm text-slate-500">Ringkasan operasional CSSD Reuse BMHP.</p>
+            @if (auth()->user()->dibatasiRuangan())
+                <p class="mt-1 text-sm text-slate-700">Ruangan: {{ auth()->user()->nama_ruangan ?: 'Belum diatur' }}</p>
+            @endif
         </div>
+
+        @if (auth()->user()->dibatasiRuangan() && !auth()->user()->punyaRuangan())
+            <div class="mb-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800" role="alert">
+                Ruangan akun belum diatur. Hubungi super admin untuk menetapkan ruangan Anda.
+            </div>
+        @endif
 
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div class="rounded border border-slate-200 bg-white p-5">

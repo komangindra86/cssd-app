@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -23,6 +24,9 @@ class User extends Authenticatable
         'email',
         'role',
         'pegawai_id',
+        'ruangan_id',
+        'nama_ruangan',
+        'departemen_id',
         'is_active',
         'password',
     ];
@@ -85,6 +89,38 @@ class User extends Authenticatable
         }
 
         return in_array($role, $roles, true);
+    }
+
+    public function dibatasiRuangan(): bool
+    {
+        return $this->role === 'user_perawat';
+    }
+
+    public function punyaRuangan(): bool
+    {
+        return filled($this->ruangan_id) && filled($this->nama_ruangan);
+    }
+
+    public function bolehAksesRuangan(?string $namaRuangan): bool
+    {
+        return !$this->dibatasiRuangan() || ($this->punyaRuangan()
+            && mb_strtolower(trim($namaRuangan ?? '')) === mb_strtolower(trim($this->nama_ruangan)));
+    }
+
+    public function batasiQueryRuangan(Builder $query, string $kolom): Builder
+    {
+        if (!$this->dibatasiRuangan()) {
+            return $query;
+        }
+
+        if (!$this->punyaRuangan()) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        // Data BMHP lama menyimpan nama ruangan, bukan ID dari SIMRS.
+        $kolom = $query->getGrammar()->wrap($kolom);
+
+        return $query->whereRaw('LOWER(TRIM(' . $kolom . ')) = ?', [mb_strtolower(trim($this->nama_ruangan))]);
     }
 
     public function roleLabel(): string

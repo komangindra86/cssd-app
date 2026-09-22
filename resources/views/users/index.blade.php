@@ -31,12 +31,23 @@
 
                 <div>
                     <label for="role" class="mb-2 block text-sm font-medium text-slate-700">Role</label>
-                    <select id="role"
+                    <select id="role" onchange="ubahrole()"
                         class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs text-slate-900 focus:border-teal-500 focus:ring-teal-500">
                         <option value="user_cssd">User CSSD</option>
                         <option value="user_perawat">User Perawat</option>
                         <option value="super_admin">Super Admin</option>
                     </select>
+                </div>
+
+                <div id="fieldruangan" class="hidden">
+                    <label for="namaruangan" class="mb-2 block text-sm font-medium text-slate-700">Ruangan</label>
+                    <input type="text" id="namaruangan" list="listruanganuser" oninput="pilihruangan()"
+                        class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs text-slate-900 focus:border-teal-500 focus:ring-teal-500"
+                        placeholder="Ketik / pilih ruangan">
+                    <input type="hidden" id="ruanganid">
+                    <input type="hidden" id="departemenid">
+                    <datalist id="listruanganuser"></datalist>
+                    <p id="errorruangan" class="mt-1 hidden text-xs text-red-500" role="alert"></p>
                 </div>
 
                 <div>
@@ -79,6 +90,7 @@
                                 <th class="border border-slate-200 p-2">Nama</th>
                                 <th class="border border-slate-200 p-2">Email</th>
                                 <th class="border border-slate-200 p-2">Role</th>
+                                <th class="border border-slate-200 p-2">Ruangan</th>
                                 <th class="border border-slate-200 p-2">Status</th>
                                 <th class="border border-slate-200 p-2">Dibuat</th>
                             </tr>
@@ -95,10 +107,13 @@
     <script>
         var tabeluser;
         var daftarpegawai = [];
+        var daftarruangan = [];
+        var ruanganuser = null;
 
         $(document).ready(function() {
             datatableuser();
             getpegawai();
+            getruangan();
             modeTambah();
         });
 
@@ -146,6 +161,7 @@
                     { data: 'name', render: function(data) { return tampil(data); } },
                     { data: 'email', render: function(data) { return tampil(data); } },
                     { data: 'role', render: function(data) { return labelrole(data); } },
+                    { data: 'nama_ruangan', render: function(data, type, row) { return row.role === 'user_perawat' ? tampil(data || 'Belum diatur') : 'Semua ruangan'; } },
                     { data: 'is_active', render: function(data) { return data ? 'Aktif' : 'Nonaktif'; } },
                     { data: 'created_at', render: function(data) { return tampil(data); } },
                 ]
@@ -179,6 +195,39 @@
             });
         }
 
+        function getruangan() {
+            $.get('/operasional/get-ruangan', function(data) {
+                daftarruangan = data.ruangan || [];
+                var pilihan = $('#listruanganuser').empty();
+
+                daftarruangan.forEach(function(item) {
+                    pilihan.append($('<option>').val(item.nama));
+                });
+
+                if (daftarruangan.length === 0) {
+                    $('#errorruangan').text('Data ruangan belum tersedia. Muat ulang untuk mencoba lagi.').removeClass('hidden');
+                }
+            }).fail(function() {
+                $('#errorruangan').text('Gagal mengambil data ruangan. Muat ulang untuk mencoba lagi.').removeClass('hidden');
+            });
+        }
+
+        function ubahrole() {
+            $('#fieldruangan').toggleClass('hidden', $('#role').val() !== 'user_perawat');
+        }
+
+        function pilihruangan() {
+            var nama = $('#namaruangan').val().trim();
+            var ruangan = daftarruangan.find(function(item) { return item.nama === nama; });
+
+            if (!ruangan && ruanganuser && ruanganuser.nama === nama) {
+                ruangan = ruanganuser;
+            }
+
+            $('#ruanganid').val(ruangan ? ruangan.id : '');
+            $('#departemenid').val(ruangan ? (ruangan.departemen_id || '') : '');
+        }
+
         function pilihpegawai() {
             var nama = $("#namapegawai").val().trim();
             var pegawai = daftarpegawai.find(function(item) {
@@ -195,6 +244,10 @@
             var password = $("#password").val();
             var password_confirmation = $("#passwordconfirmation").val();
             var pegawai_id = $("#pegawaiid").val();
+            pilihruangan();
+            var ruangan_id = role === 'user_perawat' ? $('#ruanganid').val() : '';
+            var nama_ruangan = role === 'user_perawat' ? $('#namaruangan').val().trim() : '';
+            var departemen_id = role === 'user_perawat' ? $('#departemenid').val() : '';
 
             $(".error-message").remove();
 
@@ -202,6 +255,7 @@
 
             if (name === "") { $("#namapegawai").after('<span class="error-message text-red-500">Nama pegawai wajib diisi</span>'); isValid = false; }
             if (email === "") { $("#email").after('<span class="error-message text-red-500">Email wajib diisi</span>'); isValid = false; }
+            if (role === 'user_perawat' && ruangan_id === '') { $('#namaruangan').after('<span class="error-message text-red-500">Pilih ruangan dari daftar</span>'); isValid = false; }
 
             if (mode === 'tambah' || password !== '' || password_confirmation !== '') {
                 if (password.length < 6) { $("#password").after('<span class="error-message text-red-500">Password minimal 6 karakter</span>'); isValid = false; }
@@ -218,6 +272,9 @@
                 email: email,
                 role: role,
                 pegawai_id: pegawai_id,
+                ruangan_id: ruangan_id,
+                nama_ruangan: nama_ruangan,
+                departemen_id: departemen_id,
                 password: password,
                 password_confirmation: password_confirmation
             };
@@ -229,6 +286,9 @@
             $("#namapegawai").val('');
             $("#email").val('');
             $("#role").val('user_cssd');
+            ruanganuser = null;
+            $('#namaruangan, #ruanganid, #departemenid').val('');
+            ubahrole();
             $("#password").val('');
             $("#passwordconfirmation").val('');
             $(".error-message").remove();
@@ -288,6 +348,11 @@
                 $("#namapegawai").val(user.name);
                 $("#email").val(user.email);
                 $("#role").val(user.role);
+                ruanganuser = user.ruangan_id ? { id: user.ruangan_id, nama: user.nama_ruangan, departemen_id: user.departemen_id } : null;
+                $('#namaruangan').val(user.nama_ruangan || '');
+                $('#ruanganid').val(user.ruangan_id || '');
+                $('#departemenid').val(user.departemen_id || '');
+                ubahrole();
                 $("#password").val('');
                 $("#passwordconfirmation").val('');
                 $(".error-message").remove();

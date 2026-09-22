@@ -233,9 +233,12 @@ class OperasionalCssdController extends Controller
         return response()->json($items->get());
     }
 
-    public function dashboardData()
+    public function dashboardData(Request $request)
     {
-        $status = DB::table('cssd_items')
+        $items = DB::table('cssd_items');
+        $request->user()->batasiQueryRuangan($items, 'last_unit');
+
+        $status = $items
             ->select('status', DB::raw('COUNT(*) as total'))
             ->groupBy('status')
             ->pluck('total', 'status');
@@ -1034,6 +1037,9 @@ class OperasionalCssdController extends Controller
                 'bmhp.max_reuse'
             );
 
+        $request->user()->batasiQueryRuangan($logs, 'keluar.nama_section_pengguna');
+        $request->user()->batasiQueryRuangan($logs, 'item.last_unit');
+
         if ($request->boolean('belum_uji')) {
             $logs->whereNull('keluar.hasil_uji_perawat');
         }
@@ -1205,6 +1211,9 @@ class OperasionalCssdController extends Controller
 
     public function perawatSimpan(Request $request)
     {
+        abort_if($request->user()->dibatasiRuangan() && !$request->user()->punyaRuangan(), 403,
+            'Ruangan akun belum diatur. Hubungi super admin.');
+
         $request->validate([
             'cssd_keluar_log_ids' => 'required|array',
             'cssd_keluar_log_ids.*' => 'exists:cssd_keluar_logs,id',
@@ -1226,6 +1235,13 @@ class OperasionalCssdController extends Controller
             'kriteria_rusak' => 'nullable|array',
             'catatan' => 'nullable|string',
         ]);
+
+        abort_unless($request->user()->bolehAksesRuangan($request->nama_section_pengguna), 403,
+            'Anda hanya dapat memproses BMHP dari ruangan akun Anda.');
+
+        if ($request->user()->dibatasiRuangan()) {
+            $request->merge(['nama_section_pengguna' => $request->user()->nama_ruangan]);
+        }
 
         $logIds = collect($request->cssd_keluar_log_ids)
             ->filter()
@@ -1274,12 +1290,19 @@ class OperasionalCssdController extends Controller
                     ->select(
                         'keluar.*',
                         'item.status as status_item',
+                        'item.last_unit as ruangan_item',
                         'item.reuse_ke',
                         'item.kode_unik',
                         'bmhp.max_reuse'
                     )
                     ->lockForUpdate()
                     ->first();
+
+                if ($keluar) {
+                    abort_unless($request->user()->bolehAksesRuangan($keluar->nama_section_pengguna)
+                        && $request->user()->bolehAksesRuangan($keluar->ruangan_item), 403,
+                        'Anda hanya dapat memproses BMHP dari ruangan akun Anda.');
+                }
 
                 if (!$keluar || $keluar->status_item !== 'KELUAR') {
                     throw ValidationException::withMessages([
@@ -1717,8 +1740,20 @@ class OperasionalCssdController extends Controller
         ]);
     }
 
-    public function getruangan()
+    public function getruangan(Request $request)
     {
+        $user = $request->user();
+
+        if ($user->dibatasiRuangan()) {
+            $ruangan = $user->punyaRuangan() ? [[
+                'id' => $user->ruangan_id,
+                'nama' => $user->nama_ruangan,
+                'departemen_id' => $user->departemen_id,
+            ]] : [];
+
+            return response()->json(['success' => true, 'data' => $ruangan, 'ruangan' => $ruangan]);
+        }
+
         $token = config('services.bali_mandara.token');
         $url = config('services.bali_mandara.ruangan_url');
 
@@ -1799,6 +1834,7 @@ class OperasionalCssdController extends Controller
 
     public function getrawatinap(Request $request)
     {
+        $this->validasiAksesPasienRuangan($request);
         $token = config('services.bali_mandara.token');
         $url = $this->urlRawatInap($request->ruanganfk);
 
@@ -1871,21 +1907,18 @@ class OperasionalCssdController extends Controller
                     'success' => false,
                     'message' => 'Service rawat inap mengembalikan error.',
                     'status' => $httpCode,
-                    'data' => $data ?: $response,
+                    'data' => $request->user()->dibatasiRuangan() ? null : ($data ?: $response),
                 ],
                 $httpCode
             );
         }
 
-        return response()->json([
-            'success' => true,
-            'data' => $data ?: $response,
-            'pasien' => $this->normalisasiRawatInap($data ?: []),
-        ]);
+        return $this->responsePasienRuangan($request, $data, $response);
     }
 
     public function getrawatjalan(Request $request)
     {
+        $this->validasiAksesPasienRuangan($request);
         $token = config('services.bali_mandara.token');
         $tanggal = $request->tanggal ?: now()->toDateString();
         $url = $this->urlRawatJalan($request->ruanganfk, $tanggal);
@@ -1959,17 +1992,39 @@ class OperasionalCssdController extends Controller
                     'success' => false,
                     'message' => 'Service rawat jalan mengembalikan error.',
                     'status' => $httpCode,
-                    'data' => $data ?: $response,
+                    'data' => $request->user()->dibatasiRuangan() ? null : ($data ?: $response),
                 ],
                 $httpCode
             );
         }
 
+        return $this->responsePasienRuangan($request, $data, $response);
+    }
+
+    private function responsePasienRuangan(Request $request, $data, $response)
+    {
+        $pasien = $this->normalisasiRawatInap($data ?: []);
+
+        if ($request->user()->dibatasiRuangan()) {
+            $pasien = $pasien->filter(fn ($row) => $request->user()->bolehAksesRuangan($row['ruangan']))->values();
+        }
+
         return response()->json([
             'success' => true,
-            'data' => $data ?: $response,
-            'pasien' => $this->normalisasiRawatInap($data ?: []),
+            'data' => $request->user()->dibatasiRuangan() ? $pasien : ($data ?: $response),
+            'pasien' => $pasien,
         ]);
+    }
+
+    private function validasiAksesPasienRuangan(Request $request): void
+    {
+        $user = $request->user();
+
+        if ($user->dibatasiRuangan()) {
+            abort_unless($user->punyaRuangan() && is_scalar($request->ruanganfk)
+                && (string) $request->ruanganfk === (string) $user->ruangan_id, 403,
+                'Anda hanya dapat mencari pasien dari ruangan akun Anda.');
+        }
     }
 
     private function formatHeader($name, $value)

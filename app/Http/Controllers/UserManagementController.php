@@ -17,7 +17,7 @@ class UserManagementController extends Controller
     public function data(Request $request)
     {
         $users = User::query()
-            ->select('id', 'name', 'email', 'role', 'pegawai_id', 'is_active', 'created_at');
+            ->select('id', 'name', 'email', 'role', 'pegawai_id', 'ruangan_id', 'nama_ruangan', 'departemen_id', 'is_active', 'created_at');
 
         $total = User::count();
         $search = $this->searchValue($request);
@@ -26,7 +26,8 @@ class UserManagementController extends Controller
             $users->where(function ($query) use ($search) {
                 $query->where('name', 'like', '%' . $search . '%')
                     ->orWhere('email', 'like', '%' . $search . '%')
-                    ->orWhere('role', 'like', '%' . $search . '%');
+                    ->orWhere('role', 'like', '%' . $search . '%')
+                    ->orWhere('nama_ruangan', 'like', '%' . $search . '%');
             });
         }
 
@@ -53,6 +54,7 @@ class UserManagementController extends Controller
 
     public function tambahuser(Request $request)
     {
+        $ruangan = $this->validasiRuangan($request);
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|max:255|unique:users,email',
@@ -68,6 +70,7 @@ class UserManagementController extends Controller
             'role' => $request->role,
             'is_active' => true,
             'password' => $request->password,
+            ...$ruangan,
         ]);
 
         return response()->json([
@@ -78,7 +81,7 @@ class UserManagementController extends Controller
 
     public function getuser($id)
     {
-        $user = User::select('id', 'name', 'email', 'role', 'pegawai_id', 'is_active')
+        $user = User::select('id', 'name', 'email', 'role', 'pegawai_id', 'ruangan_id', 'nama_ruangan', 'departemen_id', 'is_active')
             ->where('id', $id)
             ->first();
 
@@ -106,6 +109,7 @@ class UserManagementController extends Controller
             ], 404);
         }
 
+        $ruangan = $this->validasiRuangan($request);
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => [
@@ -131,6 +135,7 @@ class UserManagementController extends Controller
             'email' => $request->email,
             'pegawai_id' => $request->pegawai_id,
             'role' => $request->role,
+            ...$ruangan,
         ];
 
         if ($request->filled('password')) {
@@ -238,5 +243,21 @@ class UserManagementController extends Controller
     private function roles()
     {
         return ['super_admin', 'user_cssd', 'user_perawat'];
+    }
+
+    private function validasiRuangan(Request $request): array
+    {
+        if ($request->role !== 'user_perawat') {
+            return ['ruangan_id' => null, 'nama_ruangan' => null, 'departemen_id' => null];
+        }
+
+        return $request->validate([
+            'ruangan_id' => 'required|string|max:100',
+            'nama_ruangan' => 'required|string|max:255',
+            'departemen_id' => 'nullable|string|max:100',
+        ], [
+            'ruangan_id.required' => 'Pilih ruangan untuk user perawat.',
+            'nama_ruangan.required' => 'Ruangan user perawat wajib diisi.',
+        ]) + ['departemen_id' => null];
     }
 }

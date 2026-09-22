@@ -9,6 +9,12 @@
             <p class="mt-1 text-sm text-slate-500">Isi data pasien setelah alat digunakan, lalu tentukan apakah alat masih layak untuk dipakai ulang.</p>
         </div>
 
+        @if (auth()->user()->dibatasiRuangan() && !auth()->user()->punyaRuangan())
+            <div class="mb-4 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800" role="alert">
+                Ruangan akun belum diatur. Hubungi super admin untuk menetapkan ruangan Anda.
+            </div>
+        @endif
+
         <div class="mb-6 rounded border border-slate-200 bg-white">
             <div class="grid grid-cols-1 gap-4 p-6 lg:grid-cols-3">
                 <div>
@@ -21,7 +27,8 @@
                 </div>
                 <div>
                     <label class="mb-2 block text-sm font-medium text-slate-700">Nama Ruangan</label>
-                    <input type="text" id="namasectionpengguna" list="listsectionpengguna" onchange="pilihsectionrawatinap()" oninput="pilihsectionrawatinap()" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs" placeholder="Pilih ruangan">
+                    <input type="text" id="namasectionpengguna" list="listsectionpengguna" onchange="pilihsectionrawatinap()" oninput="pilihsectionrawatinap()" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs" placeholder="Pilih ruangan"
+                        value="{{ auth()->user()->dibatasiRuangan() ? auth()->user()->nama_ruangan : '' }}" @readonly(auth()->user()->dibatasiRuangan())>
                     <datalist id="listsectionpengguna"></datalist>
                 </div>
                 <div>
@@ -118,7 +125,7 @@
             </div>
 
             <div class="grid grid-cols-6 px-6 pb-6 lg:grid-cols-1">
-                <button onclick="simpan()" class="rounded bg-teal-500 px-4 py-2 text-sm font-medium text-white shadow hover:bg-teal-600">Simpan</button>
+                <button onclick="simpan()" @disabled(auth()->user()->dibatasiRuangan() && !auth()->user()->punyaRuangan()) class="rounded bg-teal-500 px-4 py-2 text-sm font-medium text-white shadow hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50">Simpan</button>
             </div>
         </div>
     </div>
@@ -365,6 +372,9 @@
             $.get('/operasional/get-ruangan', function(data) {
                 daftarruangan = data.ruangan || [];
                 rendersectionrawatinap();
+                if ($('#namasectionpengguna').val().trim() !== '') {
+                    pilihsectionrawatinap();
+                }
             }).fail(function(xhr) {
                 console.log('Gagal mengambil data ruangan', xhr.responseText);
             });
