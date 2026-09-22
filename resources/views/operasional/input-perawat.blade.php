@@ -32,17 +32,23 @@
                     <datalist id="listsectionpengguna"></datalist>
                 </div>
                 <div>
-                    <label class="mb-2 block text-sm font-medium text-slate-700">No. RM</label>
-                    <input type="text" id="norm" list="listnormrawatinap" onchange="pilihpasienrawatinap()" oninput="pilihpasienrawatinap()" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
-                    <datalist id="listnormrawatinap"></datalist>
+                    <div class="mb-2 flex items-center justify-between gap-2">
+                        <label for="norm" class="block text-sm font-medium text-slate-700">No. RM</label>
+                        <button type="button" onclick="pilihsectionrawatinap(true)" title="Muat ulang pasien SIMRS" aria-label="Muat ulang pasien SIMRS" class="text-slate-500 hover:text-teal-600"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i></button>
+                    </div>
+                    <input type="search" id="caripasien" oninput="rendernormrawatinap()" aria-label="Cari pasien SIMRS" placeholder="Cari No. RM / nama pasien" disabled class="mb-2 block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs disabled:opacity-50">
+                    <select id="norm" onchange="pilihpasienrawatinap()" disabled class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs disabled:opacity-50">
+                        <option value="">Pilih ruangan dan tanggal terlebih dahulu</option>
+                    </select>
+                    <p id="errorpasien" class="mt-1 hidden text-xs text-red-600" role="alert"></p>
                 </div>
                 <div>
-                    <label class="mb-2 block text-sm font-medium text-slate-700">Nama Pasien</label>
-                    <input type="text" id="namapasien" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
+                    <label for="namapasien" class="mb-2 block text-sm font-medium text-slate-700">Nama Pasien</label>
+                    <input type="text" id="namapasien" readonly class="block w-full rounded-lg border border-slate-300 bg-slate-100 p-2 text-xs" placeholder="Otomatis dari SIMRS">
                 </div>
                 <div>
-                    <label class="mb-2 block text-sm font-medium text-slate-700">Nama DPJP</label>
-                    <input type="text" id="namadpjp" list="listpegawai" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
+                    <label for="namadpjp" class="mb-2 block text-sm font-medium text-slate-700">Nama DPJP</label>
+                    <input type="text" id="namadpjp" readonly class="block w-full rounded-lg border border-slate-300 bg-slate-100 p-2 text-xs" placeholder="Otomatis dari SIMRS">
                 </div>
                 <div>
                     <label class="mb-2 block text-sm font-medium text-slate-700">Perawat Yang Menyatakan</label>
@@ -140,6 +146,8 @@
         var ruanganaktifdepartemen = '';
         var tanggalaktifpasien = '';
         var itemdipilih = {};
+        var requestpasien = null;
+        var statuspasien = 'Pilih ruangan dan tanggal terlebih dahulu';
 
         $(document).ready(function() {
             $("#tanggalpenggunaan").val(new Date().toISOString().slice(0, 10));
@@ -179,9 +187,9 @@
             var tanggal_penggunaan = $("#tanggalpenggunaan").val();
             var jam_penggunaan = $("#jampenggunaan").val();
             var nama_section_pengguna = $("#namasectionpengguna").val().trim();
-            var no_rm = $("#norm").val().trim();
-            var nama_pasien = $("#namapasien").val().trim();
-            var nama_dpjp = $("#namadpjp").val().trim();
+            var pasien = daftarpasienrawatinap.find(function(item) { return item.pasien_token === $("#norm").val(); });
+            var pasien_token = pasien ? pasien.pasien_token : '';
+            var ruanganfk = String(ruanganaktifid);
             var nama_perawat = $("#namaperawat").val().trim();
             var hasil_uji_perawat = $("#hasiluji").val();
             var catatan = $("#catatan").val().trim();
@@ -200,9 +208,8 @@
             if (tanggal_penggunaan === "") { $("#tanggalpenggunaan").after('<span class="error-message text-red-500">Tanggal penggunaan wajib diisi</span>'); isValid = false; }
             if (jam_penggunaan === "") { $("#jampenggunaan").after('<span class="error-message text-red-500">Jam penggunaan wajib diisi</span>'); isValid = false; }
             if (nama_section_pengguna === "") { $("#namasectionpengguna").after('<span class="error-message text-red-500">Nama ruangan wajib diisi</span>'); isValid = false; }
-            if (no_rm === "") { $("#norm").after('<span class="error-message text-red-500">No. RM wajib diisi</span>'); isValid = false; }
-            if (nama_pasien === "") { $("#namapasien").after('<span class="error-message text-red-500">Nama pasien wajib diisi</span>'); isValid = false; }
-            if (nama_dpjp === "") { $("#namadpjp").after('<span class="error-message text-red-500">Nama DPJP wajib diisi</span>'); isValid = false; }
+            if (!pasien_token) { $("#norm").after('<span class="error-message text-red-500">Pilih pasien dari daftar SIMRS</span>'); isValid = false; }
+            if (pasien && (!String(pasien.no_rm || '').trim() || !String(pasien.nama_pasien || '').trim() || !String(pasien.nama_dpjp || '').trim())) { $("#norm").after('<span class="error-message text-red-500">Data pasien atau DPJP belum lengkap di SIMRS</span>'); isValid = false; }
             if (nama_perawat === "") { $("#namaperawat").after('<span class="error-message text-red-500">Nama perawat wajib diisi</span>'); isValid = false; }
             if (hasil_uji_perawat === "") { $("#hasiluji").after('<span class="error-message text-red-500">Hasil kelayakan wajib dipilih</span>'); isValid = false; }
             if (butuh_approval_over_reuse && approval_over_reuse !== 1) { $("#boxapprovaloverreuse").append('<span class="error-message block text-red-500">Approval over max reuse wajib dicentang jika alat tetap LAYAK dan akan direuse kembali</span>'); isValid = false; }
@@ -210,12 +217,14 @@
             if (approval_over_reuse === 1 && approval_alasan === "") { $("#approvalalasan").after('<span class="error-message text-red-500">Alasan approval wajib diisi</span>'); isValid = false; }
             if (!isValid) return null;
 
-            return { _token: "{{ csrf_token() }}", cssd_keluar_log_ids, tanggal_penggunaan, jam_penggunaan, nama_section_pengguna, no_rm, nama_pasien, nama_dpjp, nama_perawat, hasil_uji_perawat, kriteria_rusak, catatan, approval_over_reuse, approval_dpjp, approval_alasan, approval_catatan };
+            return { _token: "{{ csrf_token() }}", cssd_keluar_log_ids, tanggal_penggunaan, jam_penggunaan, nama_section_pengguna, ruanganfk, pasien_token, nama_perawat, hasil_uji_perawat, kriteria_rusak, catatan, approval_over_reuse, approval_dpjp, approval_alasan, approval_catatan };
         }
 
         function kosong() {
             itemdipilih = {};
             $("#norm").val('');
+            $("#caripasien").val('');
+            rendernormrawatinap();
             $("#namapasien").val('');
             $("#namadpjp").val('');
             $("#namaperawat").val('');
@@ -380,27 +389,37 @@
             });
         }
 
-        function getrawatinap(ruanganfk) {
-            daftarpasienrawatinap = [];
-            rendernormrawatinap();
-
-            $.get('/operasional/rawat-inap', { ruanganfk: ruanganfk }, function(data) {
-                daftarpasienrawatinap = data.pasien || [];
-                rendernormrawatinap();
-            }).fail(function(xhr) {
-                console.log('Gagal mengambil data rawat inap', xhr.responseText);
-            });
+        function getrawatinap(ruanganfk, tanggal) {
+            getpasien('/operasional/rawat-inap', ruanganfk, tanggal);
         }
 
         function getrawatjalan(ruanganfk, tanggal) {
+            getpasien('/operasional/rawat-jalan', ruanganfk, tanggal);
+        }
+
+        function getigd(ruanganfk, tanggal) {
+            getpasien('/operasional/igd-pasien', ruanganfk, tanggal);
+        }
+
+        function getpasien(url, ruanganfk, tanggal) {
             daftarpasienrawatinap = [];
+            statuspasien = tanggal ? 'Memuat pasien SIMRS...' : 'Pilih tanggal penggunaan';
             rendernormrawatinap();
 
-            $.get('/operasional/rawat-jalan', { ruanganfk: ruanganfk, tanggal: tanggal }, function(data) {
+            if (!tanggal) return;
+
+            requestpasien = $.get(url, { ruanganfk: ruanganfk, tanggal: tanggal }, function(data) {
+                if (String(ruanganfk) !== String(ruanganaktifid) || tanggal !== tanggalaktifpasien) return;
                 daftarpasienrawatinap = data.pasien || [];
+                statuspasien = 'Pasien tidak ditemukan di SIMRS';
                 rendernormrawatinap();
-            }).fail(function(xhr) {
-                console.log('Gagal mengambil data rawat jalan', xhr.responseText);
+            }).fail(function(xhr, status) {
+                if (status === 'abort') return;
+                if (String(ruanganfk) !== String(ruanganaktifid) || tanggal !== tanggalaktifpasien) return;
+                daftarpasienrawatinap = [];
+                statuspasien = 'Gagal memuat pasien SIMRS';
+                rendernormrawatinap();
+                $('#errorpasien').text(pesanerror(xhr)).removeClass('hidden');
             });
         }
 
@@ -414,38 +433,44 @@
             $("#listsectionpengguna").html(pilihan);
         }
 
-        function pilihsectionrawatinap() {
+        function pilihsectionrawatinap(muatulang) {
             var section = $("#namasectionpengguna").val().trim();
             var tanggal = $("#tanggalpenggunaan").val();
             var ruangan = daftarruangan.find(function(item) {
-                return item.nama === section;
+                return String(item.nama).trim() === section;
             });
 
-            itemdipilih = {};
-            hitungdipilih();
-            updateapprovaloverreuse();
-
-            if (tabelperawatkeluar) {
-                tabelperawatkeluar.ajax.reload();
+            if (!muatulang) {
+                itemdipilih = {};
+                hitungdipilih();
+                updateapprovaloverreuse();
+                if (tabelperawatkeluar) tabelperawatkeluar.ajax.reload();
             }
 
             if (!ruangan) {
+                if (requestpasien) requestpasien.abort();
+                $('#errorpasien').text('').addClass('hidden');
                 ruanganaktifid = '';
                 ruanganaktifdepartemen = '';
                 tanggalaktifpasien = '';
                 $("#norm").val('');
+                $("#caripasien").val('');
                 $("#namapasien").val('');
                 $("#namadpjp").val('');
                 daftarpasienrawatinap = [];
+                statuspasien = 'Pilih ruangan dan tanggal terlebih dahulu';
                 rendernormrawatinap();
                 return;
             }
 
-            if (String(ruangan.id) === String(ruanganaktifid) && String(ruangan.departemen_id) === String(ruanganaktifdepartemen) && tanggal === tanggalaktifpasien) {
+            if (!muatulang && String(ruangan.id) === String(ruanganaktifid) && String(ruangan.departemen_id) === String(ruanganaktifdepartemen) && tanggal === tanggalaktifpasien) {
                 return;
             }
 
+            if (requestpasien) requestpasien.abort();
+            $('#errorpasien').text('').addClass('hidden');
             $("#norm").val('');
+            $("#caripasien").val('');
             $("#namapasien").val('');
             $("#namadpjp").val('');
             daftarpasienrawatinap = [];
@@ -453,11 +478,14 @@
             ruanganaktifdepartemen = ruangan.departemen_id;
             tanggalaktifpasien = tanggal;
 
-            if (String(ruangan.departemen_id) === '16') {
-                getrawatinap(ruangan.id);
+            if (String(ruangan.departemen_id) === '9' || String(ruangan.nama).trim().toUpperCase() === 'IGD') {
+                getigd(ruangan.id, tanggal);
+            } else if (String(ruangan.departemen_id) === '16') {
+                getrawatinap(ruangan.id, tanggal);
             } else if (String(ruangan.departemen_id) === '18') {
                 getrawatjalan(ruangan.id, tanggal);
             } else {
+                statuspasien = 'API pasien ruangan ini belum tersedia';
                 rendernormrawatinap();
             }
         }
@@ -470,24 +498,36 @@
         }
 
         function rendernormrawatinap() {
-            var pilihan = '';
+            var terpilih = $("#norm").val();
+            var cari = $("#caripasien").val().trim().toLowerCase();
+            var daftar = daftarpasienrawatinap.filter(function(item) {
+                return (item.no_rm + ' ' + item.nama_pasien + ' ' + item.nama_dpjp).toLowerCase().includes(cari);
+            });
+            var pesan = daftar.length ? 'Pilih pasien SIMRS' : (daftarpasienrawatinap.length ? 'Pencarian pasien tidak ditemukan' : statuspasien);
+            var select = $("#norm").empty().append($('<option>').val('').text(pesan));
 
-            daftarpasienrawatinap.forEach(function(item) {
-                pilihan += '<option value="' + atribut(item.no_rm) + '" label="' + atribut(item.nama_pasien) + '"></option>';
+            daftar.forEach(function(item) {
+                select.append($('<option>').val(item.pasien_token).text(item.no_rm + ' - ' + item.nama_pasien + ' | ' + (item.nama_dpjp || 'DPJP belum tersedia')));
             });
 
-            $("#listnormrawatinap").html(pilihan);
+            select.val(daftar.some(function(item) { return item.pasien_token === terpilih; }) ? terpilih : '');
+            select.prop('disabled', daftar.length === 0);
+            $("#caripasien").prop('disabled', daftarpasienrawatinap.length === 0);
+            pilihpasienrawatinap();
         }
 
         function pilihpasienrawatinap() {
-            var no_rm = $("#norm").val().trim();
+            var pasien_token = $("#norm").val();
 
-            if (no_rm === '') {
+            $("#namapasien").val('');
+            $("#namadpjp").val('');
+
+            if (!pasien_token) {
                 return;
             }
 
             var pasien = daftarpasienrawatinap.find(function(item) {
-                return item.no_rm === no_rm;
+                return item.pasien_token === pasien_token;
             });
 
             if (!pasien) {

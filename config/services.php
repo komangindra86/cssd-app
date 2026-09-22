@@ -27,6 +27,7 @@ return [
         'pegawai_url' => env('BALI_MANDARA_PEGAWAI_URL',  'https://app.balimandarahospital.com/service/emr/dropdown/pegawai_m?'),
         'rawat_inap_url' => env('BALI_MANDARA_RAWAT_INAP_URL', 'https://app.balimandarahospital.com/service/dashboard/rawat-inap/list?page=1&limit=50&offet=0&ruanganfk=303'),
         'rawat_jalan_url' => env('BALI_MANDARA_RAWAT_JALAN_URL', 'https://app.balimandarahospital.com/service/dashboard/rawat-jalan-pasien?dari=2026-05-11&sampai=2026-05-11&kelompokUser=it&ruanganfk=201&page=1&limit=100'),
+        'igd_url' => env('BALI_MANDARA_IGD_URL', 'https://app.balimandarahospital.com/service/dashboard/igd-pasien'),
         'token' => env('BALI_MANDARA_TOKEN'),
         'cookie' => env('BALI_MANDARA_COOKIE'),
         'timeout' => env('BALI_MANDARA_TIMEOUT', 30),

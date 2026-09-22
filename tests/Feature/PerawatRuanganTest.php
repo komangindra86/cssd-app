@@ -96,7 +96,7 @@ class PerawatRuanganTest extends TestCase
     public function test_perawat_tidak_bisa_mengambil_pasien_ruangan_lain(): void
     {
         $this->actingAs($this->perawat());
-        foreach (['rawat-inap', 'rawat-jalan'] as $api) {
+        foreach (['rawat-inap', 'rawat-jalan', 'igd-pasien'] as $api) {
             foreach (['?ruanganfk=303', '?ruanganfk[]=101', ''] as $query) {
                 $this->getJson('/operasional/' . $api . $query)->assertForbidden();
             }
@@ -105,7 +105,7 @@ class PerawatRuanganTest extends TestCase
 
     public function test_respons_pasien_perawat_tidak_membocorkan_data_mentah_ruangan_lain(): void
     {
-        $request = Request::create('/operasional/rawat-inap');
+        $request = Request::create('/operasional/rawat-inap', 'GET', ['ruanganfk' => '101', 'tanggal' => '2026-09-22']);
         $user = $this->perawat();
         $request->setUserResolver(fn () => $user);
         $data = ['data' => [
@@ -130,7 +130,10 @@ class PerawatRuanganTest extends TestCase
         $this->postJson('/input-perawat/simpan', $this->penilaian([$rusak['log']], ['hasil_uji_perawat' => 'TIDAK LAYAK']))
             ->assertOk();
 
-        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $layak['log'], 'nama_section_pengguna' => 'IGD', 'hasil_uji_perawat' => 'LAYAK']);
+        $this->assertDatabaseHas('cssd_keluar_logs', [
+            'id' => $layak['log'], 'nama_section_pengguna' => 'IGD', 'hasil_uji_perawat' => 'LAYAK',
+            'no_rm' => 'RM-UJI', 'nama_pasien' => 'Pasien Uji', 'nama_dpjp' => 'Dokter Uji',
+        ]);
         $this->assertDatabaseHas('cssd_ujis', ['cssd_keluar_log_id' => $layak['log'], 'hasil' => 'LAYAK']);
         $this->assertDatabaseHas('cssd_items', ['id' => $rusak['item'], 'status' => 'DISPOSE']);
     }
@@ -174,6 +177,93 @@ class PerawatRuanganTest extends TestCase
         $this->actingAs(User::factory()->create(['role' => 'super_admin']))
             ->getJson('/operasional/keluar-data')->assertOk()->assertJsonCount(1);
         $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']], ['nama_section_pengguna' => 'SANDAT']))->assertOk();
+    }
+
+    public function test_form_pasien_hanya_pilihan_api_dan_nama_tidak_bisa_diketik(): void
+    {
+        $this->actingAs($this->perawat())->get('/input-perawat')->assertOk()
+            ->assertSee('<select id="norm"', false)
+            ->assertSee('id="namapasien" readonly', false)
+            ->assertSee('id="namadpjp" readonly', false)
+            ->assertDontSee('list="listnormrawatinap"', false)
+            ->assertDontSee('id="namadpjp" list="listpegawai"', false);
+    }
+
+    public function test_simpan_menolak_identitas_pasien_manual_meski_ada_token_valid(): void
+    {
+        $item = $this->buatDistribusi('IGD');
+        $this->actingAs($this->perawat());
+        $data = $this->penilaian([$item['log']]);
+
+        foreach (['no_rm', 'nama_pasien', 'nama_dpjp'] as $kolom) {
+            $this->postJson('/input-perawat/simpan', array_replace($data, [$kolom => 'Input manual']))
+                ->assertUnprocessable()->assertJsonValidationErrors($kolom);
+        }
+
+        unset($data['pasien_token']);
+        $this->postJson('/input-perawat/simpan', $data)->assertUnprocessable()->assertJsonValidationErrors('pasien_token');
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $item['log'], 'no_rm' => '-', 'hasil_uji_perawat' => null]);
+        $this->assertDatabaseCount('cssd_ujis', 0);
+    }
+
+    public function test_pilihan_pasien_palsu_atau_berubah_ditolak(): void
+    {
+        $item = $this->buatDistribusi('IGD');
+        $this->actingAs($this->perawat());
+        $data = $this->penilaian([$item['log']]);
+        foreach (['RM-UJI', substr($data['pasien_token'], 0, -10) . 'diubah'] as $token) {
+            $this->postJson('/input-perawat/simpan', array_replace($data, ['pasien_token' => $token]))
+                ->assertUnprocessable()->assertJsonValidationErrors('pasien_token');
+        }
+        $this->assertDatabaseCount('cssd_ujis', 0);
+    }
+
+    public function test_pilihan_pasien_akun_lain_ditolak(): void
+    {
+        $item = $this->buatDistribusi('IGD');
+        $this->actingAs($this->perawat());
+        $data = $this->penilaian([$item['log']]);
+        $this->actingAs($this->perawat())->postJson('/input-perawat/simpan', $data)
+            ->assertUnprocessable()->assertJsonValidationErrors('pasien_token');
+        $this->assertDatabaseCount('cssd_ujis', 0);
+    }
+
+    public function test_pilihan_pasien_harus_sesuai_tanggal_dan_ruangan(): void
+    {
+        $item = $this->buatDistribusi('IGD');
+        $this->actingAs(User::factory()->create(['role' => 'super_admin']));
+        $data = $this->penilaian([$item['log']]);
+        foreach ([['tanggal_penggunaan' => '2026-09-23'], ['ruanganfk' => '303'], ['nama_section_pengguna' => 'SANDAT']] as $perubahan) {
+            $this->postJson('/input-perawat/simpan', array_replace($data, $perubahan))
+                ->assertUnprocessable()->assertJsonValidationErrors('pasien_token');
+        }
+        $this->assertDatabaseCount('cssd_ujis', 0);
+    }
+
+    public function test_pilihan_pasien_kedaluwarsa_harus_diminta_ulang(): void
+    {
+        $item = $this->buatDistribusi('IGD');
+        $this->actingAs($this->perawat());
+        $data = $this->penilaian([$item['log']]);
+        $this->travel(3)->hours();
+        try {
+            $this->postJson('/input-perawat/simpan', $data)->assertUnprocessable()->assertJsonValidationErrors('pasien_token');
+            $this->assertDatabaseCount('cssd_ujis', 0);
+        } finally {
+            $this->travelBack();
+        }
+    }
+
+    public function test_data_pasien_api_yang_tidak_lengkap_tidak_bisa_disimpan(): void
+    {
+        $item = $this->buatDistribusi('IGD');
+        $this->actingAs($this->perawat());
+        foreach (['namapasien', 'namalengkap'] as $kolom) {
+            $data = $this->penilaian([$item['log']]);
+            $data['pasien_token'] = $this->tokenPasien('IGD', [$kolom => '']);
+            $this->postJson('/input-perawat/simpan', $data)->assertUnprocessable()->assertJsonValidationErrors('pasien_token');
+        }
+        $this->assertDatabaseCount('cssd_ujis', 0);
     }
 
     public function test_admin_wajib_menetapkan_ruangan_perawat_dan_bisa_mengubahnya(): void
@@ -234,11 +324,31 @@ class PerawatRuanganTest extends TestCase
 
     private function penilaian(array $ids, array $overrides = []): array
     {
+        $ruangan = auth()->user()->dibatasiRuangan()
+            ? (auth()->user()->nama_ruangan ?? 'IGD')
+            : ($overrides['nama_section_pengguna'] ?? 'IGD');
+
         return array_replace([
             'cssd_keluar_log_ids' => $ids, 'tanggal_penggunaan' => '2026-09-22', 'jam_penggunaan' => '09:00',
-            'nama_section_pengguna' => 'IGD', 'no_rm' => 'RM-UJI', 'nama_pasien' => 'Pasien Uji',
-            'nama_dpjp' => 'Dokter Uji', 'nama_perawat' => 'Perawat Uji', 'hasil_uji_perawat' => 'LAYAK',
+            'nama_section_pengguna' => 'IGD', 'ruanganfk' => $ruangan === 'SANDAT' ? '303' : '101',
+            'pasien_token' => $this->tokenPasien($ruangan),
+            'nama_perawat' => 'Perawat Uji', 'hasil_uji_perawat' => 'LAYAK',
         ], $overrides);
+    }
+
+    private function tokenPasien(string $ruangan, array $overrides = []): string
+    {
+        $request = Request::create('/operasional/rawat-inap', 'GET', [
+            'ruanganfk' => $ruangan === 'SANDAT' ? '303' : '101', 'tanggal' => '2026-09-22',
+        ]);
+        $request->setUserResolver(fn () => auth()->user());
+        $data = ['response' => ['data' => [array_replace([
+            'namaruangan' => $ruangan, 'nocm' => 'RM-UJI', 'namapasien' => 'Pasien Uji', 'namalengkap' => 'Dokter Uji',
+        ], $overrides)]]];
+        $method = new \ReflectionMethod(OperasionalCssdController::class, 'responsePasienRuangan');
+        $response = $method->invoke(new OperasionalCssdController(), $request, $data, json_encode($data));
+
+        return $response->getData(true)['pasien'][0]['pasien_token'] ?? '';
     }
 
     private function buatSchema(): void

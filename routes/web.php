@@ -29,6 +29,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/operasional/get-ruangan', [OperasionalCssdController::class, 'getruangan']);
         Route::get('/operasional/rawat-inap', [OperasionalCssdController::class, 'getrawatinap']);
         Route::get('/operasional/rawat-jalan', [OperasionalCssdController::class, 'getrawatjalan']);
+        Route::get('/operasional/igd-pasien', [OperasionalCssdController::class, 'getigd']);
     });
 
     Route::middleware('role:super_admin,user_cssd')->group(function () {

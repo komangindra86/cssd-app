@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use Carbon\Carbon;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -1217,12 +1219,14 @@ class OperasionalCssdController extends Controller
         $request->validate([
             'cssd_keluar_log_ids' => 'required|array',
             'cssd_keluar_log_ids.*' => 'exists:cssd_keluar_logs,id',
-            'tanggal_penggunaan' => 'required|date',
+            'tanggal_penggunaan' => 'required|date_format:Y-m-d',
             'jam_penggunaan' => 'required|date_format:H:i',
             'nama_section_pengguna' => 'required|string|max:255',
-            'no_rm' => 'required|string|max:100',
-            'nama_pasien' => 'required|string|max:255',
-            'nama_dpjp' => 'required|string|max:255',
+            'ruanganfk' => 'required|string|max:100',
+            'pasien_token' => 'required|string|max:8192',
+            'no_rm' => 'prohibited',
+            'nama_pasien' => 'prohibited',
+            'nama_dpjp' => 'prohibited',
             'nama_perawat' => 'required|string|max:255',
             'hasil_uji_perawat' => [
                 'required',
@@ -1234,6 +1238,11 @@ class OperasionalCssdController extends Controller
             'approval_catatan' => 'nullable|string',
             'kriteria_rusak' => 'nullable|array',
             'catatan' => 'nullable|string',
+        ], [
+            'pasien_token.required' => 'Pilih pasien dari daftar SIMRS terlebih dahulu.',
+            'no_rm.prohibited' => 'No. RM harus berasal dari pilihan pasien SIMRS, bukan input manual.',
+            'nama_pasien.prohibited' => 'Nama pasien harus berasal dari pilihan pasien SIMRS, bukan input manual.',
+            'nama_dpjp.prohibited' => 'Nama DPJP harus berasal dari pilihan pasien SIMRS, bukan input manual.',
         ]);
 
         abort_unless($request->user()->bolehAksesRuangan($request->nama_section_pengguna), 403,
@@ -1242,6 +1251,9 @@ class OperasionalCssdController extends Controller
         if ($request->user()->dibatasiRuangan()) {
             $request->merge(['nama_section_pengguna' => $request->user()->nama_ruangan]);
         }
+
+        $this->validasiAksesPasienRuangan($request);
+        $pasien = $this->validasiPilihanPasien($request);
 
         $logIds = collect($request->cssd_keluar_log_ids)
             ->filter()
@@ -1271,7 +1283,7 @@ class OperasionalCssdController extends Controller
             ]);
         }
 
-        $jumlah = DB::transaction(function () use ($request, $logIds) {
+        $jumlah = DB::transaction(function () use ($request, $logIds, $pasien) {
             foreach ($logIds as $logId) {
                 $keluar = DB::table('cssd_keluar_logs as keluar')
                     ->join(
@@ -1334,9 +1346,9 @@ class OperasionalCssdController extends Controller
                         'tanggal_penggunaan' => $request->tanggal_penggunaan,
                         'jam_penggunaan' => $request->jam_penggunaan,
                         'nama_section_pengguna' => $request->nama_section_pengguna,
-                        'no_rm' => $request->no_rm,
-                        'nama_pasien' => $request->nama_pasien,
-                        'nama_dpjp' => $request->nama_dpjp,
+                        'no_rm' => $pasien['no_rm'],
+                        'nama_pasien' => $pasien['nama_pasien'],
+                        'nama_dpjp' => $pasien['nama_dpjp'],
                         'nama_perawat' => $request->nama_perawat,
                         'tanggal_uji_perawat' => $request->tanggal_penggunaan,
                         'jam_uji_perawat' => $request->jam_penggunaan,
@@ -1835,6 +1847,10 @@ class OperasionalCssdController extends Controller
     public function getrawatinap(Request $request)
     {
         $this->validasiAksesPasienRuangan($request);
+        $request->validate([
+            'ruanganfk' => 'nullable|string|max:100',
+            'tanggal' => 'nullable|date_format:Y-m-d',
+        ]);
         $token = config('services.bali_mandara.token');
         $url = $this->urlRawatInap($request->ruanganfk);
 
@@ -1919,6 +1935,10 @@ class OperasionalCssdController extends Controller
     public function getrawatjalan(Request $request)
     {
         $this->validasiAksesPasienRuangan($request);
+        $request->validate([
+            'ruanganfk' => 'nullable|string|max:100',
+            'tanggal' => 'nullable|date_format:Y-m-d',
+        ]);
         $token = config('services.bali_mandara.token');
         $tanggal = $request->tanggal ?: now()->toDateString();
         $url = $this->urlRawatJalan($request->ruanganfk, $tanggal);
@@ -2001,6 +2021,72 @@ class OperasionalCssdController extends Controller
         return $this->responsePasienRuangan($request, $data, $response);
     }
 
+    public function getigd(Request $request)
+    {
+        $this->validasiAksesPasienRuangan($request);
+        $request->validate([
+            'ruanganfk' => 'required|string|max:100',
+            'tanggal' => 'required|date_format:Y-m-d',
+        ]);
+
+        $token = config('services.bali_mandara.token');
+        $url = $this->urlIgd($request->ruanganfk, $request->tanggal);
+
+        if (!$token || !$url) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Konfigurasi API IGD belum lengkap di .env.',
+            ], 422);
+        }
+
+        $headers = [$this->formatHeader('token', $token)];
+        if (config('services.bali_mandara.cookie')) {
+            $headers[] = $this->formatHeader('Cookie', config('services.bali_mandara.cookie'));
+        }
+
+        $curl = curl_init();
+        curl_setopt_array($curl, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => max(1, (int) config('services.bali_mandara.timeout', 30)),
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+            CURLOPT_CUSTOMREQUEST => 'GET',
+            CURLOPT_HTTPHEADER => $headers,
+        ]);
+
+        $response = curl_exec($curl);
+        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        curl_close($curl);
+
+        if ($response === false) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal terhubung ke service pasien IGD. Silakan coba lagi.',
+            ], 502);
+        }
+
+        if ($httpCode >= 400) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Service pasien IGD mengembalikan error. Periksa koneksi dan autentikasi API.',
+                'status' => $httpCode,
+            ], 502);
+        }
+
+        $data = json_decode($response, true);
+        if (!is_array($data) || (int) data_get($data, 'metaData.code', 200) >= 400) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Respons pasien IGD tidak valid. Periksa autentikasi API.',
+            ], 502);
+        }
+
+        return $this->responsePasienRuangan($request, $data, $response);
+    }
+
     private function responsePasienRuangan(Request $request, $data, $response)
     {
         $pasien = $this->normalisasiRawatInap($data ?: []);
@@ -2009,11 +2095,66 @@ class OperasionalCssdController extends Controller
             $pasien = $pasien->filter(fn ($row) => $request->user()->bolehAksesRuangan($row['ruangan']))->values();
         }
 
+        // Identitas pasien saat simpan diambil dari token terenkripsi hasil API, bukan dari input browser.
+        $pasien = $pasien->map(function ($row) use ($request) {
+            $row['pasien_token'] = Crypt::encryptString(json_encode([
+                'jenis' => 'pasien-kelayakan',
+                'user_id' => (string) $request->user()->id,
+                'ruangan_id' => (string) $request->ruanganfk,
+                'tanggal' => $request->tanggal ?: now()->toDateString(),
+                'berlaku_sampai' => now()->addHours(2)->timestamp,
+                'pasien' => $row,
+            ], JSON_THROW_ON_ERROR));
+
+            return $row;
+        });
+
         return response()->json([
             'success' => true,
             'data' => $request->user()->dibatasiRuangan() ? $pasien : ($data ?: $response),
             'pasien' => $pasien,
         ]);
+    }
+
+    private function validasiPilihanPasien(Request $request): array
+    {
+        try {
+            $pilihan = json_decode(Crypt::decryptString($request->pasien_token), true, 512, JSON_THROW_ON_ERROR);
+        } catch (DecryptException | \JsonException $e) {
+            throw ValidationException::withMessages([
+                'pasien_token' => 'Pilihan pasien tidak valid. Muat ulang daftar pasien SIMRS lalu pilih kembali.',
+            ]);
+        }
+
+        if (!is_array($pilihan) || ($pilihan['jenis'] ?? '') !== 'pasien-kelayakan'
+            || ($pilihan['user_id'] ?? '') !== (string) $request->user()->id
+            || ($pilihan['ruangan_id'] ?? '') !== $request->ruanganfk
+            || ($pilihan['tanggal'] ?? '') !== $request->tanggal_penggunaan
+            || ($pilihan['berlaku_sampai'] ?? 0) <= now()->timestamp) {
+            throw ValidationException::withMessages([
+                'pasien_token' => 'Pilihan pasien tidak sesuai ruangan/tanggal atau sudah kedaluwarsa. Muat ulang daftar pasien SIMRS lalu pilih kembali.',
+            ]);
+        }
+
+        $pasien = $pilihan['pasien'] ?? [];
+        if (!is_array($pasien) || validator($pasien, [
+            'ruangan' => 'required|string|max:255',
+            'no_rm' => 'required|string|max:100',
+            'nama_pasien' => 'required|string|max:255',
+            'nama_dpjp' => 'required|string|max:255',
+        ])->fails()) {
+            throw ValidationException::withMessages([
+                'pasien_token' => 'No. RM, nama pasien, atau DPJP belum lengkap di SIMRS. Lengkapi data di SIMRS lalu muat ulang daftar pasien.',
+            ]);
+        }
+
+        if (mb_strtolower(trim($pasien['ruangan'])) !== mb_strtolower(trim($request->nama_section_pengguna))) {
+            throw ValidationException::withMessages([
+                'pasien_token' => 'Pasien tidak berasal dari ruangan yang dipilih.',
+            ]);
+        }
+
+        return $pasien;
     }
 
     private function validasiAksesPasienRuangan(Request $request): void
@@ -2089,7 +2230,7 @@ class OperasionalCssdController extends Controller
 
                 return [
                     'id' => $row['id'] ?? $row['value'] ?? $row['idruangan'] ?? $row['id_ruangan'] ?? $nama,
-                    'nama' => $nama,
+                    'nama' => trim($nama),
                     'departemen_id' => $row['objectdepartemenfk'] ?? null,
                 ];
             })
@@ -2145,6 +2286,24 @@ class OperasionalCssdController extends Controller
             'dari' => $tanggal,
             'sampai' => $tanggal,
             'ruanganfk' => $ruanganfk,
+        ]);
+    }
+
+    private function urlIgd($ruanganfk, $tanggal)
+    {
+        $url = config('services.bali_mandara.igd_url');
+        if (!$url) {
+            return null;
+        }
+
+        return $this->urlDenganQuery($url, [
+            'ruanganid' => $ruanganfk,
+            'dari' => $tanggal,
+            'sampai' => $tanggal,
+            'search' => '',
+            'statuspanggil' => '',
+            'limit' => 100,
+            'offset' => 0,
         ]);
     }
 
