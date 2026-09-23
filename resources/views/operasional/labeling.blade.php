@@ -42,12 +42,13 @@
             width: 45mm;
             height: 20mm;
             display: flex;
+            flex: none;
             flex-direction: column;
-            justify-content: center;
-            gap: 0.4mm;
+            justify-content: flex-start;
+            gap: 0.5mm;
             overflow: hidden;
-            padding: 0.7mm 1mm;
-            border: 0.2mm solid #111827;
+            padding: 0.5mm;
+            border: 0;
             background: #ffffff;
             box-sizing: border-box;
             font-family: Arial, sans-serif;
@@ -58,13 +59,16 @@
 
         .barcode-label {
             width: 100%;
-            height: 7mm;
+            height: 8mm;
             flex: none;
+            display: flex;
+            justify-content: center;
         }
 
         .barcode-label svg {
-            width: 100% !important;
-            height: 7mm !important;
+            max-width: none;
+            height: 8mm;
+            flex: none;
             display: block;
         }
 
@@ -74,7 +78,7 @@
             flex: none;
             font-size: 6.5pt;
             line-height: 1.1;
-            color: #111827;
+            color: #000;
         }
 
         .label-info h2 {
@@ -95,24 +99,20 @@
             content: " | ";
             font-weight: 700;
         }
+
+        @media screen {
+            .label-print { outline: 1px solid #cbd5e1; }
+        }
+
+        @media print {
+            .label-print { break-inside: avoid; page-break-inside: avoid; }
+        }
     </style>
 @endpush
 
 @push('scripts')
+    <script src="{{ asset('js/vendor/jsbarcode/JsBarcode.code128.min.js') }}"></script>
     <script>
-        var code128Patterns = [
-            '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
-            '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
-            '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
-            '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
-            '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
-            '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
-            '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
-            '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
-            '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
-            '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
-            '114131', '311141', '411131', '211412', '211214', '211232', '2331112'
-        ];
 
         $(document).ready(function() {
             getitem();
@@ -133,69 +133,63 @@
                 .replace(/'/g, '&apos;');
         }
 
-        function barcodeValue(text) {
-            var nilai = [];
-            var safeText = String(text ?? '').replace(/[^\x20-\x7e]/g, '?');
-
-            for (var i = 0; i < safeText.length; i++) {
-                nilai.push(safeText.charCodeAt(i) - 32);
+        function barcodeSvg(text) {
+            text = String(text ?? '');
+            if (!/^[\x20-\x7e]+$/.test(text)) {
+                throw new Error('Kode unik kosong atau berisi karakter yang tidak didukung Code 128. Kode tidak diubah otomatis.');
+            }
+            if (typeof JsBarcode !== 'function') {
+                throw new Error('Pembuat barcode belum dimuat. Muat ulang halaman sebelum mencetak.');
             }
 
-            return nilai;
-        }
-
-        function barcodeSvg(text) {
-            var values = barcodeValue(text);
-            var checksum = 104;
-            var codes = [104];
-
-            values.forEach(function(value, index) {
-                checksum += value * (index + 1);
-                codes.push(value);
-            });
-
-            codes.push(checksum % 103);
-            codes.push(106);
-
+            var barcode = {};
+            JsBarcode(barcode, text, { format: 'CODE128', displayValue: false });
+            var pattern = barcode.encodings.map(function(encoding) { return encoding.data; }).join('');
             var quietZone = 10;
-            var x = quietZone;
+            var totalWidth = pattern.length + quietZone * 2;
+            // Modul 0.25 mm = 2 dot pada head 8 dot/mm (203 dpi), tanpa dipadatkan oleh CSS.
+            var moduleMm = 0.25;
+            var widthMm = totalWidth * moduleMm;
+            if (widthMm > 44) {
+                throw new Error('Kode ini memerlukan lebar barcode ' + widthMm.toFixed(2) + ' mm. Tidak muat pada label 45 x 20 mm tanpa menipiskan garis. Gunakan label lebih lebar; kode unik tidak diubah.');
+            }
+
             var bars = '';
-
-            codes.forEach(function(code) {
-                var pattern = code128Patterns[code];
-
-                for (var i = 0; i < pattern.length; i++) {
-                    var width = parseInt(pattern.charAt(i));
-
-                    if (i % 2 === 0) {
-                        bars += '<rect x="' + x + '" y="0" width="' + width + '" height="46"/>';
-                    }
-
-                    x += width;
+            var start = -1;
+            for (var i = 0; i <= pattern.length; i++) {
+                if (pattern[i] === '1' && start < 0) start = i;
+                if (pattern[i] !== '1' && start >= 0) {
+                    bars += '<rect x="' + (start + quietZone) + '" y="0" width="' + (i - start) + '" height="32"/>';
+                    start = -1;
                 }
-            });
+            }
 
-            var totalWidth = x + quietZone;
-
-            return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + totalWidth + ' 46" preserveAspectRatio="none" aria-label="Barcode ' + xmltext(text) + '">' +
-                '<rect width="' + totalWidth + '" height="46" fill="#fff"/>' +
-                '<g fill="#111827">' + bars + '</g>' +
-                '</svg>';
+            return '<svg xmlns="http://www.w3.org/2000/svg" width="' + widthMm + 'mm" height="8mm" viewBox="0 0 ' + totalWidth + ' 32" shape-rendering="crispEdges" role="img" aria-label="Barcode ' + xmltext(text) + '">' +
+                '<rect width="' + totalWidth + '" height="32" fill="#fff"/>' +
+                '<g fill="#000">' + bars + '</g></svg>';
         }
 
         function renderBarcode(id, kode) {
-            $("#barcode-" + id).html(barcodeSvg(kode));
+            var label = document.getElementById('label-' + id);
+            try {
+                $("#barcode-" + id).html(barcodeSvg(kode));
+                label.dataset.barcodeValid = '1';
+            } catch (error) {
+                label.dataset.barcodeValid = '0';
+                $("#error-label-" + id).text(error.message || 'Barcode tidak dapat dibuat.').removeClass('hidden');
+                $("#cetak-" + id).prop('disabled', true);
+            }
         }
 
-        function sesuaikanLabel(id) {
-            var label = document.getElementById('label-' + id);
+        function sesuaikanLabel(id, doc = document) {
+            var label = doc.getElementById('label-' + id);
             var info = label.querySelector('.label-info');
-            var style = window.getComputedStyle(label);
-            var tinggiTeks = label.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
+            var style = doc.defaultView.getComputedStyle(label);
+            var tinggiTeks = label.getBoundingClientRect().height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)
                 - parseFloat(style.rowGap) - label.querySelector('.barcode-label').getBoundingClientRect().height;
             var ukuran = 6.5;
 
-            // Sesuaikan teks panjang dengan ruang cetak tanpa memotong keterangannya.
+            // Hitung ulang juga di jendela cetak karena tata letaknya terpisah dari halaman utama.
             info.style.fontSize = ukuran + 'pt';
             while (info.getBoundingClientRect().height > tinggiTeks && ukuran > 1) {
                 ukuran -= 0.25;
@@ -247,7 +241,8 @@
                                     </p>
                                 </div>
                             </div>
-                            <button onclick="cetaklabel(${item.id})" class="mt-4 rounded bg-teal-500 px-3 py-2 text-xs font-medium text-white hover:bg-teal-600">Cetak Label</button>
+                            <p id="error-label-${item.id}" class="mt-3 hidden text-xs text-red-600" role="alert"></p>
+                            <button id="cetak-${item.id}" onclick="cetaklabel(${item.id})" class="mt-4 rounded bg-teal-500 px-3 py-2 text-xs font-medium text-white hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50">Cetak Label</button>
                         </div>
                     `);
 
@@ -261,20 +256,22 @@
         }
 
         function cetaklabel(id) {
+            var label = document.getElementById('label-' + id);
+            if (!label || label.dataset.barcodeValid !== '1') {
+                alert('Barcode belum valid untuk dicetak. Periksa pesan pada label.');
+                return;
+            }
             sesuaikanLabel(id);
-            var barcode = document.querySelector('#barcode-' + id);
-            var barcodeHtml = barcode ? barcode.innerHTML : '';
-            var info = document.querySelector('#label-' + id + ' .label-info').outerHTML;
-            var isi = `
-                <div class="label-print">
-                    <div class="barcode-label">${barcodeHtml}</div>
-                    ${info}
-                </div>
-            `;
             var win = window.open('', '_blank');
+            if (!win) {
+                alert('Jendela cetak diblokir browser. Izinkan popup untuk aplikasi CSSD lalu coba lagi.');
+                return;
+            }
             win.document.write(`
+                <!DOCTYPE html>
                 <html>
                 <head>
+                    <meta charset="utf-8">
                     <title>Cetak Label</title>
                     <style>
                         @page { size: 45mm 20mm; margin: 0; }
@@ -287,19 +284,22 @@
                             font-family: Arial, sans-serif;
                         }
                         body {
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
+                            display: block;
                         }
                         ${document.getElementById('labelstyles').textContent}
                     </style>
                 </head>
-                <body>${isi}</body>
+                <body>${label.outerHTML}</body>
                 </html>
             `);
             win.document.close();
-            win.focus();
-            win.print();
+            win.onbeforeprint = function() { sesuaikanLabel(id, win.document); };
+            win.document.fonts.ready.then(function() {
+                if (win.closed) return;
+                sesuaikanLabel(id, win.document);
+                win.focus();
+                win.print();
+            });
         }
     </script>
 @endpush

@@ -3,9 +3,11 @@ setlocal DisableDelayedExpansion
 title Setting Printer Label CSSD - 45 x 20 mm
 set "CSSD_LABEL_SETUP_FILE=%~f0"
 set "CSSD_LABEL_SETUP_MODE=%~1"
+set "CSSD_LABEL_PRINTER_NAME=%~2"
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -Command "$source = [IO.File]::ReadAllText($env:CSSD_LABEL_SETUP_FILE); $marker = '# BEGIN CSSD PRINTER SETUP'; & ([scriptblock]::Create($source.Substring($source.LastIndexOf($marker) + $marker.Length)))"
 set "CSSD_LABEL_EXIT_CODE=%ERRORLEVEL%"
 if /I "%CSSD_LABEL_SETUP_MODE%"=="--check" exit /b %CSSD_LABEL_EXIT_CODE%
+if /I "%CSSD_LABEL_SETUP_MODE%"=="--list" exit /b %CSSD_LABEL_EXIT_CODE%
 echo.
 pause
 exit /b %CSSD_LABEL_EXIT_CODE%
@@ -13,8 +15,55 @@ exit /b %CSSD_LABEL_EXIT_CODE%
 # BEGIN CSSD PRINTER SETUP
 $ErrorActionPreference = 'Stop'
 $checkOnly = $env:CSSD_LABEL_SETUP_MODE -eq '--check'
+$listOnly = $env:CSSD_LABEL_SETUP_MODE -eq '--list'
 $server = $null
 $queue = $null
+
+function Show-PrinterList($printers) {
+    for ($i = 0; $i -lt $printers.Count; $i++) {
+        Write-Host ('  {0}. {1}' -f ($i + 1), $printers[$i].Name)
+        Write-Host ('     Driver: {0} | Port: {1}' -f $printers[$i].DriverName, $printers[$i].PortName)
+    }
+}
+
+function Select-LabelPrinter($printers, [bool]$checkOnly, [string]$requestedName) {
+    if ($printers.Count -eq 0) {
+        throw 'Tidak ada printer yang terdaftar pada akun Windows ini. Periksa Printers & scanners dan jalankan dengan akun yang bisa melakukan test print. Ini belum tentu berarti driver belum terinstal.'
+    }
+
+    if ($requestedName) {
+        $found = @($printers | Where-Object { $_.Name -eq $requestedName })
+        if ($found.Count -eq 1) { return $found[0] }
+        Show-PrinterList $printers
+        throw 'Nama printer yang diminta tidak ditemukan pada akun Windows ini. Gunakan nama persis dari daftar di atas.'
+    }
+
+    # Nama antrean dan driver dapat berbeda, tanpa awalan Blueprint atau akhiran ZPL.
+    $candidates = @($printers | Where-Object {
+        ($_.Name + ' ' + $_.DriverName) -match 'Blueprint|\b(?:BP[\s_-]*)?TR[\s_-]*110\b'
+    })
+    if ($candidates.Count -eq 1) { return $candidates[0] }
+
+    Write-Host 'Printer yang terdaftar di Windows:' -ForegroundColor Cyan
+    Show-PrinterList $printers
+    if ($candidates.Count -eq 0) {
+        Write-Host 'Nama printer/driver tidak memakai nama Blueprint atau TR110 yang dikenali.' -ForegroundColor Yellow
+        Write-Host 'Pilih printer label yang sudah berhasil test print; tidak perlu langsung instal ulang driver.'
+    } else {
+        Write-Host 'Ada lebih dari satu printer label. Pilih printer yang akan digunakan.'
+    }
+
+    if ($checkOnly) {
+        throw 'Tidak ada printer yang dipilih otomatis. Periksa dengan: setting-printer-label-cssd.bat --check "NAMA PRINTER". Gunakan nama dari daftar di atas.'
+    }
+
+    Write-Host '  0. Batal, tanpa mengubah pengaturan'
+    $choice = 0
+    if (![int]::TryParse((Read-Host 'Pilih nomor printer label'), [ref]$choice) -or $choice -lt 1 -or $choice -gt $printers.Count) {
+        throw 'Pemilihan dibatalkan atau nomor tidak valid. Tidak ada pengaturan yang diubah.'
+    }
+    return $printers[$choice - 1]
+}
 
 function Read-PrintXml($stream) {
     try {
@@ -95,16 +144,19 @@ function New-LabelTicket($baseTicket, $mediaOption) {
 
 try {
     Write-Host 'SETTING PRINTER LABEL CSSD' -ForegroundColor Cyan
-    Write-Host 'Blueprint BP-TR110(ZPL) | 45 x 20 mm | Portrait | Skala 100%'
+    Write-Host 'Label 45 x 20 mm | Portrait | Skala 100%'
     Write-Host ''
 
-    if ($env:CSSD_LABEL_SETUP_MODE -and $env:CSSD_LABEL_SETUP_MODE -notin @('--check', '--apply')) {
-        throw 'Pilihan tidak dikenal. Klik dua kali untuk setting, atau gunakan --check untuk pemeriksaan saja.'
+    if ($env:CSSD_LABEL_SETUP_MODE -and $env:CSSD_LABEL_SETUP_MODE -notin @('--check', '--list', '--apply')) {
+        throw 'Pilihan tidak dikenal. Klik dua kali untuk setting, gunakan --list untuk daftar printer, atau --check untuk pemeriksaan saja.'
+    }
+    if ($env:CSSD_LABEL_PRINTER_NAME -and !$checkOnly) {
+        throw 'Nama printer pada argumen kedua hanya digunakan dengan --check. Untuk setting, klik dua kali file ini lalu pilih printer dari daftar.'
     }
 
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    if (!$checkOnly -and !$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    if (!$checkOnly -and !$listOnly -and !$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Host 'Windows akan meminta izin administrator untuk menyimpan pengaturan printer.'
         $process = Start-Process -FilePath $env:CSSD_LABEL_SETUP_FILE -Verb RunAs -Wait -PassThru
         exit $process.ExitCode
@@ -115,31 +167,23 @@ try {
     }
 
     Import-Module PrintManagement -ErrorAction Stop
+    $printers = @(Get-Printer -ErrorAction Stop | Sort-Object Name)
+    if ($listOnly) {
+        Write-Host ('Akun Windows: ' + $identity.Name)
+        Write-Host 'Printer yang terdaftar di Windows:' -ForegroundColor Cyan
+        Show-PrinterList $printers
+        if ($printers.Count -eq 0) { Write-Host 'Tidak ada printer yang terlihat pada akun Windows ini.' -ForegroundColor Yellow }
+        Write-Host 'Mode daftar: tidak ada pengaturan yang diubah dan tidak ada label yang dicetak.'
+        exit 0
+    }
+
+    $printer = Select-LabelPrinter $printers $checkOnly $env:CSSD_LABEL_PRINTER_NAME
+    Write-Host ('Printer ditemukan: ' + $printer.Name)
+    Write-Host ('Driver: ' + $printer.DriverName)
+    Write-Host ('Port: ' + $printer.PortName)
+
     Add-Type -AssemblyName System.Printing
     Add-Type -AssemblyName ReachFramework
-
-    $printers = @(Get-Printer | Where-Object {
-        $_.DriverName -match 'Blueprint.*BP[- ]?TR110.*ZPL'
-    } | Sort-Object Name)
-
-    if ($printers.Count -eq 0) {
-        throw 'Printer tidak ditemukan. Hubungkan printer dan install driver Blueprint BP-TR110(ZPL), lalu jalankan file ini lagi.'
-    }
-
-    $printer = $printers[0]
-    if ($printers.Count -gt 1) {
-        Write-Host 'Ditemukan beberapa printer Blueprint:'
-        for ($i = 0; $i -lt $printers.Count; $i++) {
-            Write-Host ('  {0}. {1} ({2})' -f ($i + 1), $printers[$i].Name, $printers[$i].PortName)
-        }
-        if ($checkOnly) { throw 'Jalankan tanpa --check untuk memilih printer yang akan disetting.' }
-        $choice = 0
-        if (![int]::TryParse((Read-Host 'Pilih nomor printer'), [ref]$choice) -or $choice -lt 1 -or $choice -gt $printers.Count) {
-            throw 'Nomor printer tidak valid. Tidak ada pengaturan yang diubah.'
-        }
-        $printer = $printers[$choice - 1]
-    }
-    Write-Host ('Printer ditemukan: ' + $printer.Name)
 
     $server = New-Object System.Printing.LocalPrintServer
     $queue = $server.GetPrintQueue($printer.Name)
