@@ -37,8 +37,12 @@
                     <input type="date" id="tanggalpenggunaan" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
                 </div>
                 <div>
-                    <label class="mb-2 block text-sm font-medium text-slate-700">Nama Ruangan</label>
+                    <label class="mb-2 block text-sm font-medium text-slate-700">Ruangan Alat</label>
                     <input type="text" id="namasectionpengguna" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs" placeholder="Wajib jika belum ada riwayat keluar">
+                </div>
+                <div>
+                    <label for="namaruanganpasien" class="mb-2 block text-sm font-medium text-slate-700">Ruangan Pasien</label>
+                    <input type="text" id="namaruanganpasien" readonly class="block w-full rounded-lg border border-slate-300 bg-slate-100 p-2 text-xs">
                 </div>
                 <div>
                     <label class="mb-2 block text-sm font-medium text-slate-700">No. RM</label>
@@ -122,7 +126,8 @@
                                 <th class="border border-slate-200 p-2">Tanggal Uji</th>
                                 <th class="border border-slate-200 p-2">Kode Unik</th>
                                 <th class="border border-slate-200 p-2">Nama Alat</th>
-                                <th class="border border-slate-200 p-2">Ruangan</th>
+                                <th class="border border-slate-200 p-2">Ruangan Alat</th>
+                                <th class="border border-slate-200 p-2">Ruangan Pasien</th>
                                 <th class="border border-slate-200 p-2">No. RM</th>
                                 <th class="border border-slate-200 p-2">Nama Pasien</th>
                                 <th class="border border-slate-200 p-2">Perawat</th>
@@ -166,12 +171,14 @@
         }
 
         function isikeluarterakhir(item) {
+            $('#namaruanganpasien').val('');
             if (!item.keluar_terakhir) {
                 return;
             }
 
             $("#tanggalpenggunaan").val(item.keluar_terakhir.tanggal_penggunaan);
             $("#namasectionpengguna").val(item.keluar_terakhir.nama_section_pengguna);
+            $('#namaruanganpasien').val(item.keluar_terakhir.nama_ruangan_pasien || item.keluar_terakhir.nama_section_pengguna);
             $("#norm").val(item.keluar_terakhir.no_rm);
             $("#namapasien").val(item.keluar_terakhir.nama_pasien);
             $("#namadpjp").val(item.keluar_terakhir.nama_dpjp);
@@ -189,6 +196,7 @@
                     keluar_terakhir.hasil_uji_perawat === 'LAYAK';
 
                 if (item.status === 'DIRTY' && parseInt(item.jumlah_keluar || 0) === 0) {
+                    $('#namaruanganpasien').val('');
                     $("#cssditemid").val(item.id);
                     $("#sudahmaxreuse").val('0');
                     $("#punyariwayatkeluar").val('0');
@@ -322,6 +330,7 @@
             $("#infoalat").text('Belum ada alat dipilih.');
             $("#tanggalpenggunaan").val('');
             $("#namasectionpengguna").val('');
+            $('#namaruanganpasien').val('');
             $("#norm").val('');
             $("#namapasien").val('');
             $("#namadpjp").val('');
@@ -375,6 +384,7 @@
                     { data: 'kode_unik', render: function(data) { return tampil(data); } },
                     { data: 'nama_bmhp', render: function(data) { return tampil(data); } },
                     { data: 'nama_section_pengguna', render: function(data) { return tampil(data); } },
+                    { data: 'nama_ruangan_pasien', render: function(data, type, row) { return tampil(data || row.nama_section_pengguna); } },
                     { data: 'no_rm', render: function(data) { return tampil(data); } },
                     { data: 'nama_pasien', render: function(data) { return tampil(data); } },
                     { data: 'nama_perawat', render: function(data) { return tampil(data); } },

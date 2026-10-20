@@ -85,7 +85,8 @@
                             <th class="border border-slate-300 p-2">TANGGAL PENGGUNAAN</th>
                             <th class="border border-slate-300 p-2">NO. RM</th>
                             <th class="border border-slate-300 p-2">NAMA PASIEN</th>
-                            <th class="border border-slate-300 p-2">RUANGAN</th>
+                            <th class="border border-slate-300 p-2">RUANGAN ALAT</th>
+                            <th class="border border-slate-300 p-2">RUANGAN PASIEN</th>
                             <th class="border border-slate-300 p-2">KONDISI RUSAK</th>
                             <th class="border border-slate-300 p-2">CATATAN</th>
                             <th class="border border-slate-300 p-2">PERAWAT UJI</th>
@@ -118,7 +119,8 @@
                             <th class="border border-slate-300 p-2">REUSE KE</th>
                             <th class="border border-slate-300 p-2">METODE STERILISASI</th>
                             <th class="border border-slate-300 p-2">TANGGAL PENGGUNAAN</th>
-                            <th class="border border-slate-300 p-2">RUANGAN</th>
+                            <th class="border border-slate-300 p-2">RUANGAN ALAT</th>
+                            <th class="border border-slate-300 p-2">RUANGAN PASIEN</th>
                             <th class="border border-slate-300 p-2">NO. RM</th>
                             <th class="border border-slate-300 p-2">NAMA PASIEN</th>
                             <th class="border border-slate-300 p-2">NAMA DPJP</th>
@@ -162,7 +164,8 @@
                             <th class="border border-slate-300 p-2">KODE UNIK</th>
                             <th class="border border-slate-300 p-2">REUSE KE</th>
                             <th class="border border-slate-300 p-2">TANGGAL PENGGUNAAN</th>
-                            <th class="border border-slate-300 p-2">RUANGAN</th>
+                            <th class="border border-slate-300 p-2">RUANGAN ALAT</th>
+                            <th class="border border-slate-300 p-2">RUANGAN PASIEN</th>
                             <th class="border border-slate-300 p-2">NO. RM</th>
                             <th class="border border-slate-300 p-2">NAMA PASIEN</th>
                             <th class="border border-slate-300 p-2">NAMA DPJP</th>
@@ -326,6 +329,7 @@
                     { data: 'no_rm', render: function(data) { return tampil(data); } },
                     { data: 'nama_pasien', render: function(data) { return tampil(data); } },
                     { data: 'nama_pengguna', render: function(data) { return tampil(data); } },
+                    { data: 'nama_ruangan_pasien', render: function(data) { return tampil(data); } },
                     { data: 'kondisi_rusak', render: function(data) { return tampil(data); } },
                     { data: 'catatan', render: function(data) { return tampil(data); } },
                     { data: 'petugas_cssd', render: function(data) { return tampil(data); } },
@@ -389,6 +393,7 @@
             kolom.push(
                 { data: 'tanggal_penggunaan', render: function(data) { return tampil(data); } },
                 { data: 'nama_pengguna', render: function(data) { return tampil(data); } },
+                { data: 'nama_ruangan_pasien', render: function(data) { return tampil(data); } },
                 { data: 'no_rm', render: function(data) { return tampil(data); } },
                 { data: 'nama_pasien', render: function(data) { return tampil(data); } },
                 { data: 'nama_dpjp', render: function(data) { return tampil(data); } },
@@ -459,7 +464,8 @@
                 { title: 'TANGGAL PENGGUNAAN', key: 'tanggal_penggunaan' },
                 { title: 'NO. RM', key: 'no_rm' },
                 { title: 'NAMA PASIEN', key: 'nama_pasien' },
-                { title: 'RUANGAN', key: 'nama_pengguna' },
+                { title: 'RUANGAN ALAT', key: 'nama_pengguna' },
+                { title: 'RUANGAN PASIEN', key: 'nama_ruangan_pasien' },
                 { title: 'KONDISI RUSAK', key: 'kondisi_rusak' },
                 { title: 'CATATAN', key: 'catatan' },
                 { title: 'PERAWAT UJI', key: 'petugas_cssd' },
@@ -476,7 +482,8 @@
                 { title: 'REUSE KE', key: 'jumlah_penggunaan' },
                 { title: 'METODE STERILISASI', key: 'metode_sterilisasi' },
                 { title: 'TANGGAL PENGGUNAAN', key: 'tanggal_penggunaan' },
-                { title: 'RUANGAN', key: 'nama_pengguna' },
+                { title: 'RUANGAN ALAT', key: 'nama_pengguna' },
+                { title: 'RUANGAN PASIEN', key: 'nama_ruangan_pasien' },
                 { title: 'NO. RM', key: 'no_rm' },
                 { title: 'NAMA PASIEN', key: 'nama_pasien' },
                 { title: 'NAMA DPJP', key: 'nama_dpjp' },
@@ -494,7 +501,8 @@
                 { title: 'KODE UNIK', key: 'kode_unik' },
                 { title: 'REUSE KE', key: 'jumlah_penggunaan' },
                 { title: 'TANGGAL PENGGUNAAN', key: 'tanggal_penggunaan' },
-                { title: 'RUANGAN', key: 'nama_pengguna' },
+                { title: 'RUANGAN ALAT', key: 'nama_pengguna' },
+                { title: 'RUANGAN PASIEN', key: 'nama_ruangan_pasien' },
                 { title: 'NO. RM', key: 'no_rm' },
                 { title: 'NAMA PASIEN', key: 'nama_pasien' },
                 { title: 'NAMA DPJP', key: 'nama_dpjp' },

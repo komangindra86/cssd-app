@@ -233,7 +233,7 @@ class PerawatRuanganTest extends TestCase
         $item = $this->buatDistribusi('IGD');
         $this->actingAs(User::factory()->create(['role' => 'super_admin']));
         $data = $this->penilaian([$item['log']]);
-        foreach ([['tanggal_penggunaan' => '2026-09-23'], ['ruanganfk' => '303'], ['nama_section_pengguna' => 'SANDAT']] as $perubahan) {
+        foreach ([['tanggal_penggunaan' => '2026-09-23'], ['ruanganfk' => '303'], ['nama_ruangan_pasien' => 'SANDAT']] as $perubahan) {
             $this->postJson('/input-perawat/simpan', array_replace($data, $perubahan))
                 ->assertUnprocessable()->assertJsonValidationErrors('pasien_token');
         }
@@ -300,6 +300,210 @@ class PerawatRuanganTest extends TestCase
         }
     }
 
+    public function test_akses_pasien_tambahan_tidak_membuka_ruangan_atau_barang_lain(): void
+    {
+        $peri = $this->buatDistribusi('PERINATOLOGI');
+        $nicu = $this->buatDistribusi('NICU');
+        $this->actingAs($this->perawatPeri());
+
+        $this->getJson('/operasional/get-ruangan')->assertOk()->assertJsonCount(1, 'ruangan')
+            ->assertJsonPath('ruangan.0.nama', 'PERINATOLOGI');
+        $this->getJson('/operasional/get-ruangan?konteks=pasien')->assertOk()->assertJsonCount(2, 'ruangan')
+            ->assertJsonPath('ruangan.1.nama', 'NICU');
+        $this->getJson('/operasional/keluar-data')->assertOk()->assertJsonCount(1)
+            ->assertJsonFragment(['cssd_keluar_log_id' => $peri['log']]);
+        $this->postJson('/input-perawat/simpan', $this->penilaianLintasRuangan([$nicu['log']]))->assertForbidden();
+        $this->postJson('/input-perawat/simpan', $this->penilaianLintasRuangan([$peri['log'], $nicu['log']]))->assertForbidden();
+        $this->assertDatabaseCount('cssd_ujis', 0);
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $peri['log'], 'nama_ruangan_pasien' => null]);
+
+        config(['services.bali_mandara.token' => null]);
+        foreach (['rawat-inap', 'rawat-jalan', 'igd-pasien'] as $api) {
+            $this->getJson('/operasional/' . $api . '?ruanganfk=402&tanggal=2026-09-22')->assertUnprocessable();
+            $this->getJson('/operasional/' . $api . '?ruanganfk=303&tanggal=2026-09-22')->assertForbidden();
+        }
+    }
+
+    public function test_pasien_yang_dikembalikan_hanya_dari_ruangan_pasien_yang_dipilih(): void
+    {
+        $this->actingAs($this->perawatPeri());
+        $request = Request::create('/operasional/rawat-inap', 'GET', ['ruanganfk' => '402', 'tanggal' => '2026-09-22']);
+        $request->setUserResolver(fn () => auth()->user());
+        $data = ['data' => array_map(fn ($ruangan) => [
+            'namaruangan' => $ruangan, 'nocm' => 'RM-' . $ruangan,
+            'namapasien' => 'Pasien Uji ' . $ruangan, 'namalengkap' => 'Dokter Uji',
+        ], ['PERINATOLOGI', 'NICU', 'SANDAT'])];
+        $method = new \ReflectionMethod(OperasionalCssdController::class, 'responsePasienRuangan');
+        $response = $method->invoke(new OperasionalCssdController(), $request, $data, json_encode($data));
+        $this->assertCount(1, $response->getData(true)['pasien']);
+        $this->assertSame('RM-NICU', $response->getData(true)['pasien'][0]['no_rm']);
+        $this->assertStringNotContainsString('RM-PERINATOLOGI', $response->getContent());
+        $this->assertStringNotContainsString('RM-SANDAT', $response->getContent());
+    }
+
+    public function test_alat_peri_dipakai_pasien_nicu_tetap_peri_sampai_kembali_ready(): void
+    {
+        $alat = $this->buatDistribusi('PERINATOLOGI');
+        DB::table('cssd_items')->where('id', $alat['item'])->update(['kode_unik' => 'PERI-001', 'reuse_ke' => 1]);
+        DB::table('cssd_keluar_logs')->where('id', $alat['log'])->update(['reuse_ke_keluar' => 2]);
+        $perawat = $this->perawatPeri();
+        $this->actingAs($perawat)->postJson('/input-perawat/simpan', $this->penilaianLintasRuangan([$alat['log']]))->assertOk();
+        $this->assertDatabaseHas('cssd_items', [
+            'id' => $alat['item'], 'last_unit' => 'PERINATOLOGI', 'kode_unik' => 'PERI-001', 'reuse_ke' => 1, 'status' => 'KELUAR',
+        ]);
+        $this->assertDatabaseHas('cssd_keluar_logs', [
+            'id' => $alat['log'], 'nama_section_pengguna' => 'PERINATOLOGI', 'nama_ruangan_pasien' => 'NICU',
+            'ruangan_pasien_id' => '402', 'no_rm' => 'RM-UJI', 'nama_pasien' => 'Pasien Uji', 'nama_dpjp' => 'Dokter Uji',
+            'penilai_user_id' => $perawat->id, 'penilai_nama' => $perawat->name,
+            'reuse_ke_keluar' => 2, 'approval_over_reuse' => false,
+        ]);
+        $this->assertStringContainsString('Ruangan alat: PERINATOLOGI; ruangan pasien: NICU', DB::table('cssd_logs')->value('keterangan'));
+
+        $this->actingAs(User::factory()->create(['role' => 'user_cssd']));
+        $this->getJson('/operasional/perawat-selesai-data?draw=1&search[value]=NICU')->assertOk()
+            ->assertJsonPath('recordsFiltered', 1)->assertJsonPath('data.0.nama_ruangan_pasien', 'NICU');
+        $this->postJson('/barang-masuk/simpan', [
+            'cssd_item_id' => $alat['item'], 'tanggal_masuk' => '2026-09-23', 'kondisi_awal' => 'Baik',
+            'metode_steril' => 'DTT', 'tanggal_steril' => '2026-09-23', 'masa_expire_bulan' => 6,
+            'petugas_penerima_pencucian' => 'CSSD Uji', 'petugas_pengemasan' => 'CSSD Uji', 'petugas_sterilisasi' => 'CSSD Uji',
+        ])->assertOk()->assertJsonPath('status', 'READY')->assertJsonPath('reuse_ke', 2);
+        $this->assertDatabaseHas('cssd_items', [
+            'id' => $alat['item'], 'last_unit' => 'PERINATOLOGI', 'kode_unik' => 'PERI-001', 'reuse_ke' => 2, 'status' => 'READY',
+        ]);
+        $this->assertDatabaseHas('cssd_masuk_logs', ['cssd_item_id' => $alat['item'], 'unit_asal' => 'PERINATOLOGI', 'nama_section_pengguna' => 'PERINATOLOGI']);
+        $this->assertLaporanDuaRuangan('PERINATOLOGI', 'NICU');
+    }
+
+    public function test_tidak_layak_lintas_ruangan_masuk_dispose_tanpa_pindah_ruangan(): void
+    {
+        $alat = $this->buatDistribusi('PERINATOLOGI');
+        $this->actingAs($this->perawatPeri());
+        $this->postJson('/input-perawat/simpan', array_replace($this->penilaianLintasRuangan([$alat['log']]), [
+            'hasil_uji_perawat' => 'TIDAK LAYAK', 'catatan' => 'Rusak saat digunakan',
+        ]))->assertOk();
+        $this->assertDatabaseHas('cssd_items', ['id' => $alat['item'], 'last_unit' => 'PERINATOLOGI', 'status' => 'DISPOSE', 'reuse_ke' => 0]);
+        $this->actingAs(User::factory()->create(['role' => 'user_cssd']));
+        $this->getJson('/laporan-reuse/alat-rusak?draw=1&search[value]=NICU&tanggal_awal=2026-09-22&tanggal_akhir=2026-09-22')
+            ->assertOk()->assertJsonPath('recordsFiltered', 1)
+            ->assertJsonPath('data.0.nama_pengguna', 'PERINATOLOGI')->assertJsonPath('data.0.nama_ruangan_pasien', 'NICU');
+    }
+
+    public function test_izin_pasien_dicabut_menolak_token_lama_dan_tidak_menyimpan_penilaian(): void
+    {
+        $alat = $this->buatDistribusi('PERINATOLOGI');
+        $user = $this->perawatPeri();
+        $this->actingAs($user);
+        $data = $this->penilaianLintasRuangan([$alat['log']]);
+        $user->update(['ruangan_pasien_tambahan' => []]);
+        $this->actingAs($user->fresh())->postJson('/input-perawat/simpan', $data)->assertForbidden();
+        $this->getJson('/operasional/rawat-inap?ruanganfk=402')->assertForbidden();
+        $this->getJson('/operasional/get-ruangan?konteks=pasien')->assertJsonCount(1, 'ruangan');
+        $this->assertDatabaseCount('cssd_ujis', 0);
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $alat['log'], 'nama_ruangan_pasien' => null]);
+    }
+
+    public function test_token_pasien_tidak_bisa_dipakai_dengan_nama_atau_id_ruangan_yang_diubah(): void
+    {
+        $alat = $this->buatDistribusi('PERINATOLOGI');
+        $this->actingAs($this->perawatPeri());
+        $data = $this->penilaianLintasRuangan([$alat['log']]);
+        foreach ([['nama_ruangan_pasien' => 'PERINATOLOGI'], ['ruanganfk' => '401']] as $perubahan) {
+            $this->postJson('/input-perawat/simpan', array_replace($data, $perubahan))
+                ->assertUnprocessable()->assertJsonValidationErrors('pasien_token');
+        }
+        $this->assertDatabaseCount('cssd_ujis', 0);
+    }
+
+    public function test_izin_tambahan_tidak_berlaku_jika_ruangan_akun_belum_diatur(): void
+    {
+        $user = $this->perawatPeri();
+        $user->update(['ruangan_id' => null, 'nama_ruangan' => null]);
+        $this->actingAs($user->fresh())->getJson('/operasional/get-ruangan?konteks=pasien')->assertJsonCount(0, 'ruangan');
+        $this->getJson('/operasional/rawat-inap?ruanganfk=402')->assertForbidden();
+    }
+
+    public function test_admin_dapat_menyimpan_dan_mencabut_izin_pasien_tanpa_mengubah_ruangan_alat(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => 'super_admin']));
+        $data = [
+            'name' => 'Perawat Peri Uji', 'email' => 'peri@example.test', 'role' => 'user_perawat',
+            'password' => 'password-uji', 'password_confirmation' => 'password-uji',
+            'ruangan_id' => '401', 'nama_ruangan' => 'PERINATOLOGI', 'departemen_id' => '16',
+            'ruangan_pasien_tambahan' => [['id' => '402', 'nama' => 'NICU', 'departemen_id' => '16']],
+        ];
+        $id = $this->postJson('/users/tambah', $data)->assertOk()
+            ->assertJsonPath('user.ruangan_pasien_tambahan.0.nama', 'NICU')->json('user.id');
+        $this->getJson('/users/get/' . $id)->assertOk()->assertJsonPath('user.ruangan_pasien_tambahan.0.id', '402');
+        $this->getJson('/users/data?draw=1&search[value]=peri@example.test')->assertOk()
+            ->assertJsonPath('data.0.ruangan_pasien_tambahan.0.id', '402');
+        $this->putJson('/users/edit/' . $id, array_replace($data, ['ruangan_pasien_tambahan' => []]))
+            ->assertOk()->assertJsonPath('user.ruangan_pasien_tambahan', [])->assertJsonPath('user.nama_ruangan', 'PERINATOLOGI');
+        $this->putJson('/users/edit/' . $id, array_replace($data, ['role' => 'user_cssd']))
+            ->assertOk()->assertJsonPath('user.ruangan_pasien_tambahan', null);
+
+        foreach ([['id' => '402'], ['id' => '402', 'nama' => 'NICU'], ['id' => ['402'], 'nama' => 'NICU', 'departemen_id' => '16']] as $invalid) {
+            $this->putJson('/users/edit/' . $id, array_replace($data, ['ruangan_pasien_tambahan' => [$invalid]]))->assertUnprocessable();
+        }
+        $this->putJson('/users/edit/' . $id, array_replace($data, ['ruangan_pasien_tambahan' => array_merge($data['ruangan_pasien_tambahan'], $data['ruangan_pasien_tambahan'])]))
+            ->assertUnprocessable();
+        $this->actingAs($this->perawatPeri())->putJson('/users/edit/' . $id, $data)->assertForbidden();
+    }
+
+    public function test_laporan_lama_tetap_memakai_ruangan_sebelum_pemisahan(): void
+    {
+        $alat = $this->buatDistribusi('PERINATOLOGI');
+        DB::table('cssd_keluar_logs')->where('id', $alat['log'])->update(['no_rm' => 'RM-UJI', 'nama_pasien' => 'Pasien Lama']);
+        $this->actingAs(User::factory()->create(['role' => 'user_cssd']));
+        $this->assertLaporanDuaRuangan('PERINATOLOGI', 'PERINATOLOGI');
+    }
+
+    public function test_super_admin_tidak_menimpa_ruangan_distribusi_saat_menilai(): void
+    {
+        $alat = $this->buatDistribusi('PERINATOLOGI');
+        $this->actingAs(User::factory()->create(['role' => 'super_admin']));
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$alat['log']]))
+            ->assertUnprocessable()->assertJsonValidationErrors('cssd_keluar_log_ids');
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $alat['log'], 'nama_section_pengguna' => 'PERINATOLOGI']);
+    }
+
+    public function test_migrasi_tidak_mengubah_kode_ruangan_dan_jumlah_reuse_data_lama(): void
+    {
+        $migration = require database_path('migrations/2026_10_20_000015_add_ruangan_pasien_to_reuse.php');
+        $migration->down();
+        $alat = $this->buatDistribusi('PERINATOLOGI');
+        DB::table('cssd_items')->where('id', $alat['item'])->update(['kode_unik' => 'PERI-001', 'reuse_ke' => 2]);
+        $migration->up();
+        $this->assertDatabaseHas('cssd_items', ['id' => $alat['item'], 'kode_unik' => 'PERI-001', 'reuse_ke' => 2, 'last_unit' => 'PERINATOLOGI']);
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $alat['log'], 'nama_section_pengguna' => 'PERINATOLOGI', 'nama_ruangan_pasien' => null]);
+    }
+
+    private function assertLaporanDuaRuangan(string $alat, string $pasien): void
+    {
+        foreach (['pemakaian-pasien', 'cari-rm'] as $laporan) {
+            $this->getJson('/laporan-reuse/' . $laporan . '?draw=1&length=-1&no_rm=RM-UJI&tanggal_awal=2026-09-22&tanggal_akhir=2026-09-22&search[value]=' . $pasien)
+                ->assertOk()->assertJsonPath('recordsFiltered', 1)
+                ->assertJsonPath('data.0.nama_pengguna', $alat)->assertJsonPath('data.0.nama_ruangan_pasien', $pasien);
+            $this->getJson('/laporan-reuse/' . $laporan . '?draw=1&no_rm=RM-UJI&tanggal_awal=2026-09-23&tanggal_akhir=2026-09-23')
+                ->assertOk()->assertJsonPath('recordsFiltered', 0);
+        }
+    }
+
+    private function perawatPeri(): User
+    {
+        return $this->perawat([
+            'ruangan_id' => '401', 'nama_ruangan' => 'PERINATOLOGI', 'departemen_id' => '16',
+            'ruangan_pasien_tambahan' => [['id' => '402', 'nama' => 'NICU', 'departemen_id' => '16']],
+        ]);
+    }
+
+    private function penilaianLintasRuangan(array $ids): array
+    {
+        return $this->penilaian($ids, [
+            'nama_section_pengguna' => 'PERINATOLOGI', 'ruanganfk' => '402', 'nama_ruangan_pasien' => 'NICU',
+            'pasien_token' => $this->tokenPasien('NICU'),
+        ]);
+    }
+
     private function perawat(array $attributes = []): User
     {
         return User::factory()->create(array_replace([
@@ -330,7 +534,8 @@ class PerawatRuanganTest extends TestCase
 
         return array_replace([
             'cssd_keluar_log_ids' => $ids, 'tanggal_penggunaan' => '2026-09-22', 'jam_penggunaan' => '09:00',
-            'nama_section_pengguna' => 'IGD', 'ruanganfk' => $ruangan === 'SANDAT' ? '303' : '101',
+            'nama_section_pengguna' => 'IGD', 'ruanganfk' => $this->idRuangan($ruangan),
+            'nama_ruangan_pasien' => $ruangan,
             'pasien_token' => $this->tokenPasien($ruangan),
             'nama_perawat' => 'Perawat Uji', 'hasil_uji_perawat' => 'LAYAK',
         ], $overrides);
@@ -339,7 +544,7 @@ class PerawatRuanganTest extends TestCase
     private function tokenPasien(string $ruangan, array $overrides = []): string
     {
         $request = Request::create('/operasional/rawat-inap', 'GET', [
-            'ruanganfk' => $ruangan === 'SANDAT' ? '303' : '101', 'tanggal' => '2026-09-22',
+            'ruanganfk' => $this->idRuangan($ruangan), 'tanggal' => '2026-09-22',
         ]);
         $request->setUserResolver(fn () => auth()->user());
         $data = ['response' => ['data' => [array_replace([
@@ -381,12 +586,15 @@ class PerawatRuanganTest extends TestCase
         foreach ([
             '2026_04_29_000003_create_kriteria_rusak_table.php',
             '2026_04_29_000004_create_cssd_operasional_tables.php',
+            '2026_04_29_000005_add_penggunaan_fields_to_cssd_masuk_logs_table.php',
             '2026_04_30_000007_add_keluar_log_relation_to_operasional_tables.php',
+            '2026_06_19_000009_add_petugas_detail_to_cssd_masuk_logs_table.php',
             '2026_06_19_000010_add_perawat_flow_to_cssd_keluar_logs_table.php',
             '2026_07_28_000011_add_steril_expire_fields_to_cssd_tables.php',
             '2026_07_29_000012_add_nama_pasien_to_cssd_keluar_logs_table.php',
             '2026_08_10_000013_add_over_reuse_approval_to_cssd_keluar_logs_table.php',
             '2026_09_22_000014_add_ruangan_to_users_table.php',
+            '2026_10_20_000015_add_ruangan_pasien_to_reuse.php',
         ] as $migration) {
             $this->migrasi($migration);
         }
@@ -395,5 +603,15 @@ class PerawatRuanganTest extends TestCase
     private function migrasi(string $file): void
     {
         (require database_path('migrations/' . $file))->up();
+    }
+
+    private function idRuangan(string $nama): string
+    {
+        return match ($nama) {
+            'SANDAT' => '303',
+            'PERINATOLOGI' => '401',
+            'NICU' => '402',
+            default => '101',
+        };
     }
 }

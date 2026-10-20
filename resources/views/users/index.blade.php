@@ -50,6 +50,13 @@
                     <p id="errorruangan" class="mt-1 hidden text-xs text-red-500" role="alert"></p>
                 </div>
 
+                <div id="fieldruanganpasien" class="hidden lg:col-span-2">
+                    <label for="cariruanganpasien" class="mb-2 block text-sm font-medium text-slate-700">Akses Pasien Ruangan Tambahan</label>
+                    <input type="search" id="cariruanganpasien" oninput="renderruanganpasien()" placeholder="Cari ruangan pasien"
+                        class="mb-2 block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
+                    <div id="listruanganpasien" class="max-h-40 overflow-y-auto rounded border border-slate-300 bg-slate-50 p-2 text-xs"></div>
+                </div>
+
                 <div>
                     <label for="password" class="mb-2 block text-sm font-medium text-slate-700">Password</label>
                     <input type="password" id="password"
@@ -91,6 +98,7 @@
                                 <th class="border border-slate-200 p-2">Email</th>
                                 <th class="border border-slate-200 p-2">Role</th>
                                 <th class="border border-slate-200 p-2">Ruangan</th>
+                                <th class="border border-slate-200 p-2">Akses Pasien Tambahan</th>
                                 <th class="border border-slate-200 p-2">Status</th>
                                 <th class="border border-slate-200 p-2">Dibuat</th>
                             </tr>
@@ -109,6 +117,7 @@
         var daftarpegawai = [];
         var daftarruangan = [];
         var ruanganuser = null;
+        var ruanganpasientambahan = [];
 
         $(document).ready(function() {
             datatableuser();
@@ -162,6 +171,7 @@
                     { data: 'email', render: function(data) { return tampil(data); } },
                     { data: 'role', render: function(data) { return labelrole(data); } },
                     { data: 'nama_ruangan', render: function(data, type, row) { return row.role === 'user_perawat' ? tampil(data || 'Belum diatur') : 'Semua ruangan'; } },
+                    { data: 'ruangan_pasien_tambahan', render: function(data, type, row) { return row.role === 'user_perawat' ? tampil((data || []).map(function(item) { return item.nama; }).join(', ') || '-') : '-'; } },
                     { data: 'is_active', render: function(data) { return data ? 'Aktif' : 'Nonaktif'; } },
                     { data: 'created_at', render: function(data) { return tampil(data); } },
                 ]
@@ -203,6 +213,7 @@
                 daftarruangan.forEach(function(item) {
                     pilihan.append($('<option>').val(item.nama));
                 });
+                renderruanganpasien();
 
                 if (daftarruangan.length === 0) {
                     $('#errorruangan').text('Data ruangan belum tersedia. Muat ulang untuk mencoba lagi.').removeClass('hidden');
@@ -214,6 +225,27 @@
 
         function ubahrole() {
             $('#fieldruangan').toggleClass('hidden', $('#role').val() !== 'user_perawat');
+            $('#fieldruanganpasien').toggleClass('hidden', $('#role').val() !== 'user_perawat');
+            renderruanganpasien();
+        }
+
+        function renderruanganpasien() {
+            var cari = $('#cariruanganpasien').val().trim().toLowerCase();
+            var daftar = daftarruangan.concat(ruanganpasientambahan).filter(function(item, index, semua) {
+                return String(item.id) !== $('#ruanganid').val()
+                    && semua.findIndex(function(row) { return String(row.id) === String(item.id); }) === index
+                    && item.nama.toLowerCase().includes(cari);
+            });
+            var list = $('#listruanganpasien').empty();
+            daftar.forEach(function(item) {
+                var dipilih = ruanganpasientambahan.some(function(row) { return String(row.id) === String(item.id); });
+                var checkbox = $('<input>').attr('type', 'checkbox').prop('checked', dipilih).on('change', function() {
+                    ruanganpasientambahan = ruanganpasientambahan.filter(function(row) { return String(row.id) !== String(item.id); });
+                    if (this.checked) ruanganpasientambahan.push({ id: String(item.id), nama: item.nama, departemen_id: String(item.departemen_id || '') });
+                });
+                list.append($('<label>').addClass('mb-1 flex items-center gap-2').append(checkbox, $('<span>').text(item.nama)));
+            });
+            if (!daftar.length) list.text('Ruangan tidak ditemukan');
         }
 
         function pilihruangan() {
@@ -226,6 +258,7 @@
 
             $('#ruanganid').val(ruangan ? ruangan.id : '');
             $('#departemenid').val(ruangan ? (ruangan.departemen_id || '') : '');
+            renderruanganpasien();
         }
 
         function pilihpegawai() {
@@ -248,6 +281,8 @@
             var ruangan_id = role === 'user_perawat' ? $('#ruanganid').val() : '';
             var nama_ruangan = role === 'user_perawat' ? $('#namaruangan').val().trim() : '';
             var departemen_id = role === 'user_perawat' ? $('#departemenid').val() : '';
+            var ruangan_pasien_tambahan = role === 'user_perawat'
+                ? ruanganpasientambahan.filter(function(item) { return String(item.id) !== ruangan_id; }) : [];
 
             $(".error-message").remove();
 
@@ -275,6 +310,7 @@
                 ruangan_id: ruangan_id,
                 nama_ruangan: nama_ruangan,
                 departemen_id: departemen_id,
+                ruangan_pasien_tambahan: ruangan_pasien_tambahan,
                 password: password,
                 password_confirmation: password_confirmation
             };
@@ -287,6 +323,8 @@
             $("#email").val('');
             $("#role").val('user_cssd');
             ruanganuser = null;
+            ruanganpasientambahan = [];
+            $('#cariruanganpasien').val('');
             $('#namaruangan, #ruanganid, #departemenid').val('');
             ubahrole();
             $("#password").val('');
@@ -352,6 +390,8 @@
                 $('#namaruangan').val(user.nama_ruangan || '');
                 $('#ruanganid').val(user.ruangan_id || '');
                 $('#departemenid').val(user.departemen_id || '');
+                ruanganpasientambahan = user.ruangan_pasien_tambahan || [];
+                $('#cariruanganpasien').val('');
                 ubahrole();
                 $("#password").val('');
                 $("#passwordconfirmation").val('');

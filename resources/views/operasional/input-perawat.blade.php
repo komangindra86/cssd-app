@@ -26,10 +26,16 @@
                     <input type="time" id="jampenggunaan" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs">
                 </div>
                 <div>
-                    <label class="mb-2 block text-sm font-medium text-slate-700">Nama Ruangan</label>
-                    <input type="text" id="namasectionpengguna" list="listsectionpengguna" onchange="pilihsectionrawatinap()" oninput="pilihsectionrawatinap()" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs" placeholder="Pilih ruangan"
+                    <label for="namasectionpengguna" class="mb-2 block text-sm font-medium text-slate-700">Ruangan Alat</label>
+                    <input type="text" id="namasectionpengguna" list="listsectionpengguna" oninput="ruanganalatberubah()" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs" placeholder="Pilih ruangan alat"
                         value="{{ auth()->user()->dibatasiRuangan() ? auth()->user()->nama_ruangan : '' }}" @readonly(auth()->user()->dibatasiRuangan())>
                     <datalist id="listsectionpengguna"></datalist>
+                </div>
+                <div>
+                    <label for="ruanganpasien" class="mb-2 block text-sm font-medium text-slate-700">Ruangan Pasien</label>
+                    <select id="ruanganpasien" onchange="pilihsectionrawatinap()" disabled class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs disabled:opacity-50">
+                        <option value="">Memuat ruangan pasien...</option>
+                    </select>
                 </div>
                 <div>
                     <div class="mb-2 flex items-center justify-between gap-2">
@@ -118,7 +124,7 @@
                                 <th class="border border-slate-200 p-2">Tanggal Keluar</th>
                                 <th class="border border-slate-200 p-2">Kode Unik</th>
                                 <th class="border border-slate-200 p-2">Nama Alat</th>
-                                <th class="border border-slate-200 p-2">Ruangan</th>
+                                <th class="border border-slate-200 p-2">Ruangan Alat</th>
                                 <th class="border border-slate-200 p-2">Perawat Penerima</th>
                                 <th class="border border-slate-200 p-2">Reuse</th>
                                 <th class="border border-slate-200 p-2">Tanggal Steril</th>
@@ -141,6 +147,7 @@
     <script>
         var tabelperawatkeluar;
         var daftarruangan = [];
+        var daftarruanganpasien = [];
         var daftarpasienrawatinap = [];
         var ruanganaktifid = '';
         var ruanganaktifdepartemen = '';
@@ -190,6 +197,8 @@
             var pasien = daftarpasienrawatinap.find(function(item) { return item.pasien_token === $("#norm").val(); });
             var pasien_token = pasien ? pasien.pasien_token : '';
             var ruanganfk = String(ruanganaktifid);
+            var ruanganpasien = daftarruanganpasien.find(function(item) { return String(item.id) === ruanganfk; });
+            var nama_ruangan_pasien = ruanganpasien ? ruanganpasien.nama : '';
             var nama_perawat = $("#namaperawat").val().trim();
             var hasil_uji_perawat = $("#hasiluji").val();
             var catatan = $("#catatan").val().trim();
@@ -208,6 +217,7 @@
             if (tanggal_penggunaan === "") { $("#tanggalpenggunaan").after('<span class="error-message text-red-500">Tanggal penggunaan wajib diisi</span>'); isValid = false; }
             if (jam_penggunaan === "") { $("#jampenggunaan").after('<span class="error-message text-red-500">Jam penggunaan wajib diisi</span>'); isValid = false; }
             if (nama_section_pengguna === "") { $("#namasectionpengguna").after('<span class="error-message text-red-500">Nama ruangan wajib diisi</span>'); isValid = false; }
+            if (!nama_ruangan_pasien) { $('#ruanganpasien').after('<span class="error-message text-red-500">Pilih ruangan pasien</span>'); isValid = false; }
             if (!pasien_token) { $("#norm").after('<span class="error-message text-red-500">Pilih pasien dari daftar SIMRS</span>'); isValid = false; }
             if (pasien && (!String(pasien.no_rm || '').trim() || !String(pasien.nama_pasien || '').trim() || !String(pasien.nama_dpjp || '').trim())) { $("#norm").after('<span class="error-message text-red-500">Data pasien atau DPJP belum lengkap di SIMRS</span>'); isValid = false; }
             if (nama_perawat === "") { $("#namaperawat").after('<span class="error-message text-red-500">Nama perawat wajib diisi</span>'); isValid = false; }
@@ -217,7 +227,7 @@
             if (approval_over_reuse === 1 && approval_alasan === "") { $("#approvalalasan").after('<span class="error-message text-red-500">Alasan approval wajib diisi</span>'); isValid = false; }
             if (!isValid) return null;
 
-            return { _token: "{{ csrf_token() }}", cssd_keluar_log_ids, tanggal_penggunaan, jam_penggunaan, nama_section_pengguna, ruanganfk, pasien_token, nama_perawat, hasil_uji_perawat, kriteria_rusak, catatan, approval_over_reuse, approval_dpjp, approval_alasan, approval_catatan };
+            return { _token: "{{ csrf_token() }}", cssd_keluar_log_ids, tanggal_penggunaan, jam_penggunaan, nama_section_pengguna, ruanganfk, nama_ruangan_pasien, pasien_token, nama_perawat, hasil_uji_perawat, kriteria_rusak, catatan, approval_over_reuse, approval_dpjp, approval_alasan, approval_catatan };
         }
 
         function kosong() {
@@ -381,11 +391,23 @@
             $.get('/operasional/get-ruangan', function(data) {
                 daftarruangan = data.ruangan || [];
                 rendersectionrawatinap();
-                if ($('#namasectionpengguna').val().trim() !== '') {
-                    pilihsectionrawatinap();
-                }
             }).fail(function(xhr) {
-                console.log('Gagal mengambil data ruangan', xhr.responseText);
+                $('#errorpasien').text('Gagal mengambil daftar ruangan alat. Muat ulang halaman.').removeClass('hidden');
+            });
+
+            $.get('/operasional/get-ruangan', { konteks: 'pasien' }, function(data) {
+                daftarruanganpasien = data.ruangan || [];
+                var select = $('#ruanganpasien').empty().append($('<option>').val('').text('Pilih ruangan pasien'));
+                daftarruanganpasien.forEach(function(item) {
+                    select.append($('<option>').val(String(item.id)).text(item.nama));
+                });
+                select.prop('disabled', daftarruanganpasien.length === 0);
+                var sendiri = daftarruanganpasien.find(function(item) { return item.nama === $('#namasectionpengguna').val().trim(); });
+                if (sendiri) select.val(String(sendiri.id));
+                pilihsectionrawatinap();
+            }).fail(function() {
+                $('#ruanganpasien').empty().append($('<option>').val('').text('Gagal memuat ruangan pasien'));
+                $('#errorpasien').text('Gagal mengambil daftar ruangan pasien. Muat ulang halaman.').removeClass('hidden');
             });
         }
 
@@ -424,28 +446,33 @@
         }
 
         function rendersectionrawatinap() {
-            var pilihan = '';
+            var pilihan = $('#listsectionpengguna').empty();
 
             daftarruangan.forEach(function(item) {
-                pilihan += '<option value="' + atribut(item.nama) + '"></option>';
+                pilihan.append($('<option>').val(item.nama));
             });
 
-            $("#listsectionpengguna").html(pilihan);
+        }
+
+        function ruanganalatberubah() {
+            itemdipilih = {};
+            hitungdipilih();
+            updateapprovaloverreuse();
+            if (tabelperawatkeluar) tabelperawatkeluar.ajax.reload();
+            if (!$('#ruanganpasien').val()) {
+                var sendiri = daftarruanganpasien.find(function(item) { return item.nama === $('#namasectionpengguna').val().trim(); });
+                if (sendiri) {
+                    $('#ruanganpasien').val(String(sendiri.id));
+                    pilihsectionrawatinap();
+                }
+            }
         }
 
         function pilihsectionrawatinap(muatulang) {
-            var section = $("#namasectionpengguna").val().trim();
             var tanggal = $("#tanggalpenggunaan").val();
-            var ruangan = daftarruangan.find(function(item) {
-                return String(item.nama).trim() === section;
+            var ruangan = daftarruanganpasien.find(function(item) {
+                return String(item.id) === $('#ruanganpasien').val();
             });
-
-            if (!muatulang) {
-                itemdipilih = {};
-                hitungdipilih();
-                updateapprovaloverreuse();
-                if (tabelperawatkeluar) tabelperawatkeluar.ajax.reload();
-            }
 
             if (!ruangan) {
                 if (requestpasien) requestpasien.abort();

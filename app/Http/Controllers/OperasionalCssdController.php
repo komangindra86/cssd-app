@@ -1124,6 +1124,7 @@ class OperasionalCssdController extends Controller
                 'keluar.tanggal_uji_perawat',
                 'keluar.jam_uji_perawat',
                 'keluar.nama_section_pengguna',
+                'keluar.nama_ruangan_pasien',
                 'keluar.no_rm',
                 'keluar.nama_pasien',
                 'keluar.nama_dpjp',
@@ -1196,7 +1197,8 @@ class OperasionalCssdController extends Controller
                         'keluar.approval_alasan',
                         'like',
                         '%' . $search . '%'
-                    );
+                    )
+                    ->orWhere('keluar.nama_ruangan_pasien', 'like', '%' . $search . '%');
             });
         }
 
@@ -1223,6 +1225,7 @@ class OperasionalCssdController extends Controller
             'jam_penggunaan' => 'required|date_format:H:i',
             'nama_section_pengguna' => 'required|string|max:255',
             'ruanganfk' => 'required|string|max:100',
+            'nama_ruangan_pasien' => 'required|string|max:255',
             'pasien_token' => 'required|string|max:8192',
             'no_rm' => 'prohibited',
             'nama_pasien' => 'prohibited',
@@ -1323,6 +1326,12 @@ class OperasionalCssdController extends Controller
                     ]);
                 }
 
+                if (mb_strtolower(trim($keluar->nama_section_pengguna)) !== mb_strtolower(trim($request->nama_section_pengguna))) {
+                    throw ValidationException::withMessages([
+                        'cssd_keluar_log_ids' => 'Pilih alat sesuai ruangan alat. Ruangan pasien tidak mengubah ruangan alat.',
+                    ]);
+                }
+
                 $hasil = $request->hasil_uji_perawat;
                 $layak = $hasil === 'LAYAK';
                 $reuseKe = $keluar->reuse_ke_keluar
@@ -1345,7 +1354,10 @@ class OperasionalCssdController extends Controller
                     ->update([
                         'tanggal_penggunaan' => $request->tanggal_penggunaan,
                         'jam_penggunaan' => $request->jam_penggunaan,
-                        'nama_section_pengguna' => $request->nama_section_pengguna,
+                        'ruangan_pasien_id' => $request->ruanganfk,
+                        'nama_ruangan_pasien' => $pasien['ruangan'],
+                        'penilai_user_id' => $request->user()->id,
+                        'penilai_nama' => $request->user()->name,
                         'no_rm' => $pasien['no_rm'],
                         'nama_pasien' => $pasien['nama_pasien'],
                         'nama_dpjp' => $pasien['nama_dpjp'],
@@ -1398,13 +1410,17 @@ class OperasionalCssdController extends Controller
                     $this->simpanLog(
                         $keluar->cssd_item_id,
                         'DISPOSE',
-                        'Perawat menyatakan alat tidak layak digunakan ulang setelah dipakai pasien',
+                        'Perawat menyatakan alat tidak layak digunakan ulang setelah dipakai pasien. Ruangan alat: ' .
+                            $keluar->nama_section_pengguna . '; ruangan pasien: ' . $pasien['ruangan'] .
+                            '; dicatat oleh: ' . $request->user()->name,
                         $request->tanggal_penggunaan,
                         $request->nama_perawat
                     );
                 } else {
                     $keterangan =
-                        'Perawat menyatakan alat masih layak digunakan ulang setelah dipakai pasien';
+                        'Perawat menyatakan alat masih layak digunakan ulang setelah dipakai pasien. Ruangan alat: ' .
+                        $keluar->nama_section_pengguna . '; ruangan pasien: ' . $pasien['ruangan'] .
+                        '; dicatat oleh: ' . $request->user()->name;
 
                     if ($approvalBerlaku) {
                         $keterangan .=
@@ -1763,6 +1779,10 @@ class OperasionalCssdController extends Controller
                 'departemen_id' => $user->departemen_id,
             ]] : [];
 
+            if ($request->input('konteks') === 'pasien') {
+                $ruangan = $user->ruanganPasienDiizinkan();
+            }
+
             return response()->json(['success' => true, 'data' => $ruangan, 'ruangan' => $ruangan]);
         }
 
@@ -2092,7 +2112,9 @@ class OperasionalCssdController extends Controller
         $pasien = $this->normalisasiRawatInap($data ?: []);
 
         if ($request->user()->dibatasiRuangan()) {
-            $pasien = $pasien->filter(fn ($row) => $request->user()->bolehAksesRuangan($row['ruangan']))->values();
+            $ruangan = $request->user()->ruanganPasienDiizinkanById($request->ruanganfk);
+            $pasien = $pasien->filter(fn ($row) => $ruangan
+                && mb_strtolower(trim($row['ruangan'])) === mb_strtolower(trim($ruangan['nama'])))->values();
         }
 
         // Identitas pasien saat simpan diambil dari token terenkripsi hasil API, bukan dari input browser.
@@ -2148,7 +2170,12 @@ class OperasionalCssdController extends Controller
             ]);
         }
 
-        if (mb_strtolower(trim($pasien['ruangan'])) !== mb_strtolower(trim($request->nama_section_pengguna))) {
+        $namaRuangan = $request->user()->dibatasiRuangan()
+            ? ($request->user()->ruanganPasienDiizinkanById($request->ruanganfk)['nama'] ?? '')
+            : $request->nama_ruangan_pasien;
+
+        if (mb_strtolower(trim($pasien['ruangan'])) !== mb_strtolower(trim($namaRuangan))
+            || mb_strtolower(trim($pasien['ruangan'])) !== mb_strtolower(trim($request->nama_ruangan_pasien))) {
             throw ValidationException::withMessages([
                 'pasien_token' => 'Pasien tidak berasal dari ruangan yang dipilih.',
             ]);
@@ -2162,9 +2189,8 @@ class OperasionalCssdController extends Controller
         $user = $request->user();
 
         if ($user->dibatasiRuangan()) {
-            abort_unless($user->punyaRuangan() && is_scalar($request->ruanganfk)
-                && (string) $request->ruanganfk === (string) $user->ruangan_id, 403,
-                'Anda hanya dapat mencari pasien dari ruangan akun Anda.');
+            abort_unless($user->ruanganPasienDiizinkanById($request->ruanganfk), 403,
+                'Anda hanya dapat mencari pasien dari ruangan yang diizinkan super admin.');
         }
     }
 

@@ -96,6 +96,7 @@ class ReportReuseController extends Controller
                 'uji.petugas as petugas_cssd',
                 'keluar.tanggal_penggunaan',
                 'keluar.nama_section_pengguna as nama_pengguna',
+                'keluar.nama_ruangan_pasien',
                 'keluar.no_rm',
                 'keluar.nama_pasien',
                 'keluar.approval_over_reuse',
@@ -115,6 +116,7 @@ class ReportReuseController extends Controller
                     ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_pasien', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_section_pengguna', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.nama_ruangan_pasien', 'like', '%' . $search . '%')
                     ->orWhere('keluar.approval_dpjp', 'like', '%' . $search . '%')
                     ->orWhere('keluar.approval_alasan', 'like', '%' . $search . '%')
                     ->orWhere('uji.catatan', 'like', '%' . $search . '%')
@@ -146,6 +148,7 @@ class ReportReuseController extends Controller
                 'tanggal_uji' => $row->tanggal_uji,
                 'tanggal_penggunaan' => $row->tanggal_penggunaan ?: '',
                 'nama_pengguna' => $row->nama_pengguna ?: '',
+                'nama_ruangan_pasien' => $row->nama_ruangan_pasien ?: ($row->nama_pengguna ?: ''),
                 'no_rm' => $row->no_rm ?: '',
                 'nama_pasien' => $row->nama_pasien ?: '',
                 'kondisi_rusak' => !empty($kondisi) ? implode(', ', $kondisi) : ($row->catatan ?: 'Tidak layak'),
@@ -208,6 +211,7 @@ class ReportReuseController extends Controller
                 'steril.metode_steril',
                 'keluar.tanggal_penggunaan',
                 'keluar.nama_section_pengguna as nama_pengguna',
+                'keluar.nama_ruangan_pasien',
                 'keluar.no_rm',
                 'keluar.nama_pasien',
                 'keluar.nama_dpjp',
@@ -247,6 +251,7 @@ class ReportReuseController extends Controller
                 $subQuery->where('item.kode_unik', 'like', '%' . $search . '%')
                     ->orWhere('bmhp.nama', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_section_pengguna', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.nama_ruangan_pasien', 'like', '%' . $search . '%')
                     ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_pasien', 'like', '%' . $search . '%')
                     ->orWhere('keluar.nama_dpjp', 'like', '%' . $search . '%')
@@ -291,6 +296,7 @@ class ReportReuseController extends Controller
                 'metode_sterilisasi' => $row->metode_steril ?: '',
                 'tanggal_penggunaan' => $row->tanggal_penggunaan,
                 'nama_pengguna' => $row->nama_pengguna,
+                'nama_ruangan_pasien' => $row->nama_ruangan_pasien ?: $row->nama_pengguna,
                 'no_rm' => $row->no_rm,
                 'nama_pasien' => $row->nama_pasien,
                 'nama_dpjp' => $row->nama_dpjp,

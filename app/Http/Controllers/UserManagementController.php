@@ -17,7 +17,7 @@ class UserManagementController extends Controller
     public function data(Request $request)
     {
         $users = User::query()
-            ->select('id', 'name', 'email', 'role', 'pegawai_id', 'ruangan_id', 'nama_ruangan', 'departemen_id', 'is_active', 'created_at');
+            ->select('id', 'name', 'email', 'role', 'pegawai_id', 'ruangan_id', 'nama_ruangan', 'departemen_id', 'ruangan_pasien_tambahan', 'is_active', 'created_at');
 
         $total = User::count();
         $search = $this->searchValue($request);
@@ -81,7 +81,7 @@ class UserManagementController extends Controller
 
     public function getuser($id)
     {
-        $user = User::select('id', 'name', 'email', 'role', 'pegawai_id', 'ruangan_id', 'nama_ruangan', 'departemen_id', 'is_active')
+        $user = User::select('id', 'name', 'email', 'role', 'pegawai_id', 'ruangan_id', 'nama_ruangan', 'departemen_id', 'ruangan_pasien_tambahan', 'is_active')
             ->where('id', $id)
             ->first();
 
@@ -248,16 +248,27 @@ class UserManagementController extends Controller
     private function validasiRuangan(Request $request): array
     {
         if ($request->role !== 'user_perawat') {
-            return ['ruangan_id' => null, 'nama_ruangan' => null, 'departemen_id' => null];
+            return ['ruangan_id' => null, 'nama_ruangan' => null, 'departemen_id' => null, 'ruangan_pasien_tambahan' => null];
         }
 
-        return $request->validate([
+        $data = $request->validate([
             'ruangan_id' => 'required|string|max:100',
             'nama_ruangan' => 'required|string|max:255',
             'departemen_id' => 'nullable|string|max:100',
+            'ruangan_pasien_tambahan' => 'nullable|array|max:100',
+            'ruangan_pasien_tambahan.*' => 'required|array:id,nama,departemen_id',
+            'ruangan_pasien_tambahan.*.id' => 'required|string|max:100|distinct',
+            'ruangan_pasien_tambahan.*.nama' => 'required|string|max:255',
+            'ruangan_pasien_tambahan.*.departemen_id' => 'required|string|max:100',
         ], [
             'ruangan_id.required' => 'Pilih ruangan untuk user perawat.',
             'nama_ruangan.required' => 'Ruangan user perawat wajib diisi.',
         ]) + ['departemen_id' => null];
+
+        $data['ruangan_pasien_tambahan'] = collect($data['ruangan_pasien_tambahan'] ?? [])
+            ->reject(fn ($ruangan) => $ruangan['id'] === $data['ruangan_id'])
+            ->values()->all();
+
+        return $data;
     }
 }

@@ -27,6 +27,7 @@ class User extends Authenticatable
         'ruangan_id',
         'nama_ruangan',
         'departemen_id',
+        'ruangan_pasien_tambahan',
         'is_active',
         'password',
     ];
@@ -52,6 +53,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'is_active' => 'boolean',
             'password' => 'hashed',
+            'ruangan_pasien_tambahan' => 'array',
         ];
     }
 
@@ -105,6 +107,29 @@ class User extends Authenticatable
     {
         return !$this->dibatasiRuangan() || ($this->punyaRuangan()
             && mb_strtolower(trim($namaRuangan ?? '')) === mb_strtolower(trim($this->nama_ruangan)));
+    }
+
+    public function ruanganPasienDiizinkan(): array
+    {
+        if (!$this->punyaRuangan()) {
+            return [];
+        }
+
+        return collect([[
+            'id' => $this->ruangan_id,
+            'nama' => $this->nama_ruangan,
+            'departemen_id' => $this->departemen_id,
+        ]])->concat($this->ruangan_pasien_tambahan ?? [])->unique('id')->values()->all();
+    }
+
+    public function ruanganPasienDiizinkanById($id): ?array
+    {
+        if (!is_scalar($id)) {
+            return null;
+        }
+
+        return collect($this->ruanganPasienDiizinkan())
+            ->first(fn ($ruangan) => (string) $ruangan['id'] === (string) $id);
     }
 
     public function batasiQueryRuangan(Builder $query, string $kolom): Builder
