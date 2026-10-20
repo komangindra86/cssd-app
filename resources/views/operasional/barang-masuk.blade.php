@@ -11,6 +11,7 @@
 
         <div class="mb-6 rounded border border-slate-200 bg-white">
             <input type="hidden" id="cssditemid">
+            <input type="hidden" id="cssdkeluarlogid">
             <input type="hidden" id="sudahmaxreuse" value="0">
             <input type="hidden" id="punyariwayatkeluar" value="0">
             <input type="hidden" id="prosesawal" value="0">
@@ -108,7 +109,7 @@
             </div>
 
             <div class="grid grid-cols-6 px-6 pb-6 lg:grid-cols-1">
-                <button onclick="simpan()" class="rounded bg-teal-500 px-4 py-2 text-sm font-medium text-white shadow hover:bg-teal-600">Simpan</button>
+                <button id="tombolsimpan" onclick="simpan()" class="rounded bg-teal-500 px-4 py-2 text-sm font-medium text-white shadow hover:bg-teal-600 disabled:opacity-50">Simpan</button>
             </div>
         </div>
 
@@ -146,6 +147,9 @@
 @push('scripts')
     <script>
         var tabelperawatmasuk;
+        var pencarianalat = null;
+        var urutanpencarian = 0;
+        var sedangmenyimpan = false;
 
         $(document).ready(function() {
             $("#tanggalmasuk").val(new Date().toISOString().slice(0, 10));
@@ -157,8 +161,13 @@
             $("#kodeunik").on('keypress', function(e) {
                 if (e.which === 13) carialat();
             });
+            $("#kodeunik").on('input', function() {
+                batalpilihan();
+                $("#infoalat").text('Scan/cari ulang alat setelah kode diubah.');
+            });
             $("#tbperawatmasuk").on('click', '.pilihperawat', function() {
-                pilihdariperawat($(this).data('kode'));
+                var data = tabelperawatmasuk.row($(this).closest('tr')).data();
+                if (data) pilihdariperawat(data.kode_unik, data.cssd_keluar_log_id);
             });
         });
 
@@ -176,6 +185,7 @@
                 return;
             }
 
+            $("#cssdkeluarlogid").val(item.keluar_terakhir.id);
             $("#tanggalpenggunaan").val(item.keluar_terakhir.tanggal_penggunaan);
             $("#namasectionpengguna").val(item.keluar_terakhir.nama_section_pengguna);
             $('#namaruanganpasien').val(item.keluar_terakhir.nama_ruangan_pasien || item.keluar_terakhir.nama_section_pengguna);
@@ -185,11 +195,28 @@
             $("#namaperawat").val(item.keluar_terakhir.nama_perawat);
         }
 
-        function carialat() {
+        function batalpilihan() {
+            urutanpencarian++;
+            if (pencarianalat) {
+                pencarianalat.abort();
+                pencarianalat = null;
+            }
+            $("#cssditemid, #cssdkeluarlogid").val('');
+            $("#sudahmaxreuse, #punyariwayatkeluar, #prosesawal").val('0');
+            $("#tanggalpenggunaan, #namasectionpengguna, #namaruanganpasien, #norm, #namapasien, #namadpjp, #namaperawat").val('');
+        }
+
+        function carialat(keluarLogId) {
+            if (sedangmenyimpan) return;
+            batalpilihan();
             var kode = $("#kodeunik").val().trim();
             if (kode === "") { alert("Kode unik wajib diisi"); return; }
+            var urutan = urutanpencarian;
+            var parameter = keluarLogId ? { cssd_keluar_log_id: keluarLogId } : {};
+            $("#infoalat").text('Mencari alat...');
 
-            $.get('/operasional/item-kode/' + encodeURIComponent(kode), function(item) {
+            pencarianalat = $.get('/operasional/item-kode/' + encodeURIComponent(kode), parameter, function(item) {
+                if (urutan !== urutanpencarian) return;
                 var keluar_terakhir = item.keluar_terakhir || null;
                 var approval_over_reuse = keluar_terakhir &&
                     parseInt(keluar_terakhir.approval_over_reuse || 0) === 1 &&
@@ -268,17 +295,18 @@
                 $("#infoalat").html(`<b>${item.kode_unik}</b> - ${item.nama_bmhp}<br>Reuse sekarang: ${item.reuse_ke}/${item.max_reuse}<br>Status: ${item.status}<br>Ruangan: ${item.last_unit ?? '-'}`);
 
                 isikeluarterakhir(item);
-            }).fail(function() {
-                $("#cssditemid").val('');
-                $("#sudahmaxreuse").val('0');
-                $("#punyariwayatkeluar").val('0');
-                $("#prosesawal").val('0');
-                $("#infoalat").text('Kode alat tidak ditemukan.');
+            }).fail(function(xhr, status) {
+                if (status === 'abort' || urutan !== urutanpencarian) return;
+                $("#infoalat").text(xhr.responseJSON?.message || 'Gagal mencari alat. Silakan coba lagi.');
+                if (xhr.status === 422) getperawatmasuk();
+            }).always(function() {
+                if (urutan === urutanpencarian) pencarianalat = null;
             });
         }
 
         function nilai() {
             var cssd_item_id = $("#cssditemid").val();
+            var cssd_keluar_log_id = $("#cssdkeluarlogid").val();
             var tanggal_masuk = $("#tanggalmasuk").val();
             var tanggal_penggunaan = $("#tanggalpenggunaan").val();
             var nama_section_pengguna = $("#namasectionpengguna").val().trim();
@@ -301,6 +329,7 @@
             var perlu_steril = sudah_max_reuse !== "1";
          
             if (cssd_item_id === "") { $("#kodeunik").after('<span class="error-message text-red-500">Scan/cari alat valid terlebih dahulu</span>'); isValid = false; }
+            if (proses_awal !== "1" && cssd_keluar_log_id === "") { $("#kodeunik").after('<span class="error-message text-red-500">Pilih transaksi perawat atau scan ulang alat</span>'); isValid = false; }
             if (punya_riwayat_keluar !== "1" && proses_awal !== "1") {
                 if (tanggal_penggunaan === "") { $("#tanggalpenggunaan").after('<span class="error-message text-red-500">Tanggal penggunaan wajib diisi</span>'); isValid = false; }
                 if (nama_section_pengguna === "") { $("#namasectionpengguna").after('<span class="error-message text-red-500">Nama ruangan wajib diisi</span>'); isValid = false; }
@@ -318,10 +347,11 @@
             if (perlu_steril && petugas_sterilisasi === "") { $("#petugassterilisasi").after('<span class="error-message text-red-500">Petugas sterilisasi wajib diisi</span>'); isValid = false; }
             if (!isValid) return null;
 
-            return { _token: "{{ csrf_token() }}", cssd_item_id, tanggal_masuk, tanggal_penggunaan, nama_section_pengguna, no_rm, nama_pasien, nama_dpjp, nama_perawat, kondisi_awal, metode_steril, tanggal_steril, masa_expire_bulan, petugas_penerima_pencucian, petugas_pengemasan, petugas_sterilisasi };
+            return { _token: "{{ csrf_token() }}", cssd_item_id, cssd_keluar_log_id, tanggal_masuk, tanggal_penggunaan, nama_section_pengguna, no_rm, nama_pasien, nama_dpjp, nama_perawat, kondisi_awal, metode_steril, tanggal_steril, masa_expire_bulan, petugas_penerima_pencucian, petugas_pengemasan, petugas_sterilisasi };
         }
 
         function kosong() {
+            batalpilihan();
             $("#cssditemid").val('');
             $("#sudahmaxreuse").val('0');
             $("#punyariwayatkeluar").val('0');
@@ -346,14 +376,15 @@
             $(".error-message").remove();
         }
 
-        function pilihdariperawat(kode) {
-            if (!kode) {
-                alert('Kode alat tidak ditemukan pada data perawat.');
+        function pilihdariperawat(kode, keluarLogId) {
+            if (sedangmenyimpan) return;
+            if (!kode || !keluarLogId) {
+                alert('Transaksi alat tidak ditemukan pada data perawat. Muat ulang daftar.');
                 return;
             }
 
             $("#kodeunik").val(kode);
-            carialat();
+            carialat(keluarLogId);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -372,7 +403,7 @@
                         orderable: false,
                         searchable: false,
                         render: function(data) {
-                            return '<button type="button" class="pilihperawat rounded bg-teal-500 px-3 py-1 text-xs font-medium text-white hover:bg-teal-600" data-kode="' + atribut(data.kode_unik) + '">Pilih</button>';
+                            return '<button type="button" class="pilihperawat rounded bg-teal-500 px-3 py-1 text-xs font-medium text-white hover:bg-teal-600">Pilih</button>';
                         }
                     },
                     { data: null, render: function(data) {
@@ -473,13 +504,14 @@
         }
 
         function simpan() {
-            // console.log('Tombol simpan ditekan');
+            if (sedangmenyimpan) return;
             var data = nilai();
-            // console.log('Data yang akan dikirim:', data);
             if (data === null) return;
             if ($("#sudahmaxreuse").val() === "1") {
                 if (!confirm('Barang sudah mencapai batas maksimal reuse. Sistem akan menyimpan status menjadi EXPIRED / STOP PENGGUNAAN. Lanjutkan?')) return;
             }
+            sedangmenyimpan = true;
+            $("#tombolsimpan, #kodeunik").prop('disabled', true);
             $.ajax({
                 url: '/barang-masuk/simpan',
                 type: 'POST',
@@ -490,7 +522,19 @@
                     getperawatmasuk();
                     kosong();
                 },
-                error: function(xhr) { alert('Terjadi kesalahan: ' + xhr.responseText); }
+                error: function(xhr) {
+                    var pesan = xhr.responseJSON?.message || 'Penerimaan belum berhasil disimpan. Silakan coba lagi.';
+                    alert(pesan);
+                    if (xhr.status === 422) {
+                        batalpilihan();
+                        $("#infoalat").text(pesan);
+                        getperawatmasuk();
+                    }
+                },
+                complete: function() {
+                    sedangmenyimpan = false;
+                    $("#tombolsimpan, #kodeunik").prop('disabled', false);
+                }
             });
         }
     </script>

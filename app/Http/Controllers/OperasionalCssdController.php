@@ -253,8 +253,12 @@ class OperasionalCssdController extends Controller
         ]);
     }
 
-    public function itemByKode($kode)
+    public function itemByKode(Request $request, $kode)
     {
+        $request->validate([
+            'cssd_keluar_log_id' => 'nullable|integer|min:1',
+        ]);
+
         $item = DB::table('cssd_items')
             ->join('master_bmhp', 'cssd_items.bmhp_id', '=', 'master_bmhp.id')
             ->select(
@@ -280,6 +284,25 @@ class OperasionalCssdController extends Controller
             ->where('cssd_item_id', $item->id)
             ->orderByDesc('id')
             ->first();
+
+        if ($request->filled('cssd_keluar_log_id') && (
+            !$item->keluar_terakhir ||
+            (int) $request->cssd_keluar_log_id !== (int) $item->keluar_terakhir->id ||
+            $item->status !== 'KELUAR' ||
+            $item->keluar_terakhir->hasil_uji_perawat !== 'LAYAK'
+        )) {
+            return response()->json([
+                'message' => 'Transaksi yang dipilih sudah tidak tersedia untuk penerimaan. Muat ulang daftar lalu pilih kembali.',
+            ], 422);
+        }
+
+        if ($item->keluar_terakhir && DB::table('cssd_masuk_logs')
+            ->where('cssd_keluar_log_id', $item->keluar_terakhir->id)
+            ->exists()) {
+            return response()->json([
+                'message' => 'Transaksi ini sudah diterima CSSD dan tidak dapat diproses kembali.',
+            ], 422);
+        }
 
         return response()->json($item);
     }
@@ -310,6 +333,7 @@ class OperasionalCssdController extends Controller
     {
         $request->validate([
             'cssd_item_id' => 'required|exists:cssd_items,id',
+            'cssd_keluar_log_id' => 'nullable|integer|min:1',
             'tanggal_masuk' => 'required|date',
             'kondisi_awal' => 'nullable|string',
             'metode_steril' => [
@@ -332,6 +356,13 @@ class OperasionalCssdController extends Controller
             'petugas_sterilisasi' => 'nullable|string|max:255',
         ]);
 
+        return DB::transaction(function () use ($request) {
+            return $this->prosesPenerimaan($request);
+        });
+    }
+
+    private function prosesPenerimaan(Request $request)
+    {
         $petugasPenerimaPencucian = $request->petugas_penerima_pencucian;
         $petugasPengemasan = $request->petugas_pengemasan;
         $petugasSterilisasi = $request->petugas_sterilisasi;
@@ -340,12 +371,13 @@ class OperasionalCssdController extends Controller
             ->join('master_bmhp', 'cssd_items.bmhp_id', '=', 'master_bmhp.id')
             ->select('cssd_items.*', 'master_bmhp.max_reuse')
             ->where('cssd_items.id', $request->cssd_item_id)
+            ->lockForUpdate()
             ->first();
-        // dd($item);
 
         $keluar = DB::table('cssd_keluar_logs')
             ->where('cssd_item_id', $request->cssd_item_id)
             ->orderByDesc('id')
+            ->lockForUpdate()
             ->first();
 
         $sterilisasiAwal = $item && $item->status === 'DIRTY' && !$keluar;
@@ -363,6 +395,12 @@ class OperasionalCssdController extends Controller
         }
 
         if ($sterilisasiAwal) {
+            if ($request->filled('cssd_keluar_log_id')) {
+                return response()->json([
+                    'message' => 'Sterilisasi awal tidak memiliki transaksi distribusi. Scan ulang alat terlebih dahulu.',
+                ], 422);
+            }
+
             if (!$request->metode_steril) {
                 return response()->json(
                     [
@@ -491,6 +529,19 @@ class OperasionalCssdController extends Controller
                 ],
                 422
             );
+        }
+
+        if (!$request->filled('cssd_keluar_log_id') ||
+            (int) $request->cssd_keluar_log_id !== (int) $keluar->id) {
+            return response()->json([
+                'message' => 'Transaksi penerimaan sudah berubah atau belum dipilih. Scan ulang alat atau pilih kembali dari daftar perawat.',
+            ], 422);
+        }
+
+        if (DB::table('cssd_masuk_logs')->where('cssd_keluar_log_id', $keluar->id)->exists()) {
+            return response()->json([
+                'message' => 'Transaksi ini sudah diterima CSSD dan tidak dapat diproses kembali.',
+            ], 422);
         }
 
         if (empty($keluar->hasil_uji_perawat)) {
@@ -1114,6 +1165,17 @@ class OperasionalCssdController extends Controller
             ->join('master_bmhp as bmhp', 'item.bmhp_id', '=', 'bmhp.id')
             ->where('item.status', 'KELUAR')
             ->where('keluar.hasil_uji_perawat', 'LAYAK')
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('cssd_keluar_logs as terbaru')
+                    ->whereColumn('terbaru.cssd_item_id', 'keluar.cssd_item_id')
+                    ->whereColumn('terbaru.id', '>', 'keluar.id');
+            })
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('cssd_masuk_logs as masuk')
+                    ->whereColumn('masuk.cssd_keluar_log_id', 'keluar.id');
+            })
             ->select(
                 'keluar.id as cssd_keluar_log_id',
                 'keluar.cssd_item_id',
