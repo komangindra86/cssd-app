@@ -46,6 +46,7 @@
                         <option value="READY">READY</option>
                         <option value="EXPIRED">EXPIRED</option>
                         <option value="DISPOSE">DISPOSE</option>
+                        <option value="KELUAR" hidden>KELUAR</option>
                     </select>
                 </div>
 
@@ -66,6 +67,11 @@
                     </div>
                 </div>
             </div>
+
+            <p id="infokeluar" class="mx-6 mb-4 hidden rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                Alat sedang KELUAR (didistribusikan). Status, reuse, dan ruangan dikunci; selesaikan lewat
+                Input Kelayakan Alat dan Penerimaan BMHP Reuse.
+            </p>
 
             <div class="grid grid-cols-6 px-6 pb-6 lg:grid-cols-1">
                 <button onclick="simpan()" id="simpanButton"
@@ -182,8 +188,14 @@
             $("#reuseke").val('0');
             $("#status").val('READY');
             $("#lastunit").val('');
+            kunciitemkeluar(false);
             tutupdropdownunit();
             $(".error-message").remove();
+        }
+
+        function kunciitemkeluar(terkunci) {
+            $("#status, #reuseke, #lastunit, #unitdropdownwrap button").prop('disabled', terkunci);
+            $("#infokeluar").toggleClass('hidden', !terkunci);
         }
 
         function labelStatus(status) {
@@ -357,6 +369,8 @@
                 $("#reuseke").val(data.item.reuse_ke);
                 $("#status").val(data.item.status);
                 $("#lastunit").val(data.item.last_unit);
+                kunciitemkeluar(data.item.status === 'KELUAR');
+                $(".error-message").remove();
 
                 $("#simpanButton").hide();
                 $("#editButton").show();

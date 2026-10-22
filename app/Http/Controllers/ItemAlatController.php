@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class ItemAlatController extends Controller
 {
@@ -205,7 +206,7 @@ class ItemAlatController extends Controller
                 Rule::unique('cssd_items', 'kode_unik')->ignore($id),
             ],
             'reuse_ke' => 'required|integer|min:0|max:100',
-            'status' => ['required', Rule::in(['DIRTY', 'READY', 'EXPIRED', 'DISPOSE'])],
+            'status' => ['required', Rule::in(['DIRTY', 'READY', 'EXPIRED', 'DISPOSE', 'KELUAR'])],
             'last_unit' => 'nullable|string|max:255',
         ], $this->pesanValidasi());
 
@@ -223,16 +224,33 @@ class ItemAlatController extends Controller
             );
         }
 
-        DB::table('cssd_items')
-            ->where('id', $id)
-            ->update([
-                'bmhp_id' => $request->bmhp_id,
-                'kode_unik' => $request->kode_unik,
-                'reuse_ke' => $request->reuse_ke,
-                'status' => $request->status,
-                'last_unit' => $request->last_unit,
-                'updated_at' => now(),
-            ]);
+        $this->validasiPerubahanStatus($request, $item);
+
+        DB::transaction(function () use ($request, $item) {
+            DB::table('cssd_items')
+                ->where('id', $item->id)
+                ->update([
+                    'bmhp_id' => $request->bmhp_id,
+                    'kode_unik' => $request->kode_unik,
+                    'reuse_ke' => $request->reuse_ke,
+                    'status' => $request->status,
+                    'last_unit' => $request->last_unit,
+                    'updated_at' => now(),
+                ]);
+
+            if ($item->status !== $request->status) {
+                DB::table('cssd_logs')->insert([
+                    'cssd_item_id' => $item->id,
+                    'status' => $request->status,
+                    'keterangan' => 'Status diubah manual dari ' . $item->status . ' ke ' .
+                        $request->status . ' melalui menu Item Alat',
+                    'tanggal' => now()->toDateString(),
+                    'petugas' => $request->user()->name,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        });
 
         $updatedItem = DB::table('cssd_items')
             ->where('id', $id)
@@ -295,6 +313,36 @@ class ItemAlatController extends Controller
         }
 
         return $search ?? '';
+    }
+
+    private function validasiPerubahanStatus(Request $request, $item): void
+    {
+        // Alat yang sedang didistribusikan hanya boleh berpindah status lewat Input Kelayakan / Penerimaan.
+        if ($item->status === 'KELUAR') {
+            $ruanganBerubah = trim((string) $request->last_unit) !== trim((string) $item->last_unit);
+
+            if ($request->status !== 'KELUAR' || $ruanganBerubah || (int) $request->reuse_ke !== (int) $item->reuse_ke) {
+                throw ValidationException::withMessages([
+                    'status' => 'Alat sedang KELUAR (didistribusikan). Status, reuse, dan ruangan tidak bisa diubah manual; selesaikan lewat Input Kelayakan Alat dan Penerimaan BMHP Reuse.',
+                ]);
+            }
+
+            return;
+        }
+
+        if ($request->status === 'KELUAR') {
+            throw ValidationException::withMessages([
+                'status' => 'Status KELUAR hanya bisa diberikan melalui menu Pendistribusian BMHP Reuse.',
+            ]);
+        }
+
+        // DIRTY hanya untuk sterilisasi awal; alat yang sudah pernah didistribusikan tidak bisa diterima lagi dengan status ini.
+        if ($request->status === 'DIRTY' && $item->status !== 'DIRTY'
+            && DB::table('cssd_keluar_logs')->where('cssd_item_id', $item->id)->exists()) {
+            throw ValidationException::withMessages([
+                'status' => 'Status DIRTY hanya untuk alat baru yang belum pernah didistribusikan.',
+            ]);
+        }
     }
 
     private function pesanValidasi()
