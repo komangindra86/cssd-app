@@ -172,6 +172,29 @@ class PerawatRuanganTest extends TestCase
         $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']]))->assertForbidden();
     }
 
+    public function test_log_lama_atau_sudah_dinilai_tidak_bisa_ditimpa(): void
+    {
+        $item = $this->buatDistribusi('IGD');
+        DB::table('cssd_keluar_logs')->where('id', $item['log'])->update(['hasil_uji_perawat' => 'LAYAK', 'no_rm' => 'RM-LAMA']);
+        $baru = DB::table('cssd_keluar_logs')->insertGetId([
+            'cssd_item_id' => $item['item'], 'tanggal_keluar' => '2026-09-22', 'jam_keluar' => '10:00',
+            'tanggal_penggunaan' => '2026-09-22', 'nama_section_pengguna' => 'IGD',
+            'no_rm' => '-', 'nama_dpjp' => '-', 'nama_perawat' => '-', 'petugas' => 'Petugas Uji', 'reuse_ke_keluar' => 2,
+        ]);
+        $this->actingAs($this->perawat());
+
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']], ['hasil_uji_perawat' => 'TIDAK LAYAK']))
+            ->assertUnprocessable()->assertJsonValidationErrors('cssd_keluar_log_ids');
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $item['log'], 'no_rm' => 'RM-LAMA', 'hasil_uji_perawat' => 'LAYAK']);
+        $this->assertDatabaseHas('cssd_items', ['id' => $item['item'], 'status' => 'KELUAR']);
+
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$baru]))->assertOk();
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$baru], ['hasil_uji_perawat' => 'TIDAK LAYAK']))
+            ->assertUnprocessable();
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $baru, 'hasil_uji_perawat' => 'LAYAK']);
+        $this->assertDatabaseHas('cssd_items', ['id' => $item['item'], 'status' => 'KELUAR']);
+    }
+
     public function test_super_admin_masih_bisa_menilai_barang_dari_ruangan_lain(): void
     {
         $item = $this->buatDistribusi('SANDAT');

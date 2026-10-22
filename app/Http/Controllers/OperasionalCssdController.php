@@ -1394,6 +1394,18 @@ class OperasionalCssdController extends Controller
                     ]);
                 }
 
+                // Hanya distribusi terbaru yang belum dinilai, agar riwayat siklus sebelumnya tidak tertimpa.
+                $logTerbaru = DB::table('cssd_keluar_logs')
+                    ->where('cssd_item_id', $keluar->cssd_item_id)
+                    ->max('id');
+
+                if ((int) $logTerbaru !== (int) $keluar->id || !empty($keluar->hasil_uji_perawat)) {
+                    throw ValidationException::withMessages([
+                        'cssd_keluar_log_ids' => 'Item ' . $keluar->kode_unik .
+                            ' sudah dinilai atau bukan distribusi terbaru. Muat ulang daftar lalu pilih kembali.',
+                    ]);
+                }
+
                 $hasil = $request->hasil_uji_perawat;
                 $layak = $hasil === 'LAYAK';
                 $reuseKe = $keluar->reuse_ke_keluar
