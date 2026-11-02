@@ -82,7 +82,7 @@ class ItemAlatStatusTest extends TestCase
 
         $this->putJson("/item-alat/edit/{$pernahKeluar}", $this->form(['status' => 'DIRTY']))
             ->assertUnprocessable()->assertJsonValidationErrors('status');
-        $this->putJson("/item-alat/edit/{$baru}", $this->form(['kode_unik' => 'CPAP-BARU', 'status' => 'DIRTY', 'reuse_ke' => 0, 'last_unit' => null]))
+        $this->putJson("/item-alat/edit/{$baru}", $this->form(['kode_unik' => 'CPAP-BARU', 'status' => 'DIRTY', 'reuse_ke' => 0, 'last_unit' => 'SANDAT']))
             ->assertOk();
 
         $this->assertDatabaseHas('cssd_items', ['id' => $pernahKeluar, 'status' => 'READY']);

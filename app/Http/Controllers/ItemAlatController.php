@@ -151,7 +151,7 @@ class ItemAlatController extends Controller
             'kode_unik' => 'required|string|max:100|unique:cssd_items,kode_unik',
             'reuse_ke' => 'required|integer|min:0|max:100',
             'status' => ['required', Rule::in(['DIRTY', 'READY', 'EXPIRED', 'DISPOSE'])],
-            'last_unit' => 'nullable|string|max:255',
+            'last_unit' => 'required|string|max:255',
         ], $this->pesanValidasi());
 
         $request->merge(['last_unit' => app(RuanganSimrs::class)->namaResmi($request->last_unit, 'last_unit')]);
@@ -229,8 +229,9 @@ class ItemAlatController extends Controller
 
         $this->validasiPerubahanStatus($request, $item);
 
-        // Ruangan alat KELUAR sudah dikunci di atas; selain itu ruangan wajib sesuai daftar SIMRS.
+        // Ruangan alat KELUAR sudah dikunci di atas; selain itu ruangan wajib diisi sesuai daftar SIMRS.
         if ($item->status !== 'KELUAR') {
+            $request->validate(['last_unit' => 'required'], $this->pesanValidasi());
             $request->merge(['last_unit' => app(RuanganSimrs::class)->namaResmi($request->last_unit, 'last_unit')]);
         }
 
@@ -367,6 +368,7 @@ class ItemAlatController extends Controller
             'reuse_ke.max' => 'Reuse ke maksimal 100.',
             'status.required' => 'Status wajib dipilih.',
             'status.in' => 'Status tidak valid.',
+            'last_unit.required' => 'Ruangan wajib dipilih dari daftar SIMRS.',
             'last_unit.max' => 'Ruangan maksimal 255 karakter.',
         ];
     }

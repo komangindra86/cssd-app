@@ -40,8 +40,27 @@ class RuanganSimrsTest extends TestCase
 
         $this->postJson('/item-alat/tambah', $this->formItem(['last_unit' => '  rawat inap   picu/nicu ']))
             ->assertOk()->assertJsonPath('item.last_unit', 'RAWAT INAP PICU/NICU');
-        $this->postJson('/item-alat/tambah', $this->formItem(['kode_unik' => 'NCU-SLNP-02', 'last_unit' => null]))
-            ->assertOk()->assertJsonPath('item.last_unit', null);
+    }
+
+    public function test_ruangan_item_alat_wajib_diisi_kecuali_alat_keluar(): void
+    {
+        foreach ([null, '', '   '] as $kosong) {
+            $this->postJson('/item-alat/tambah', $this->formItem(['kode_unik' => 'NCU-SLNP-02', 'last_unit' => $kosong]))
+                ->assertUnprocessable()->assertJsonPath('errors.last_unit.0', 'Ruangan wajib dipilih dari daftar SIMRS.');
+        }
+        $this->assertDatabaseCount('cssd_items', 0);
+
+        $lama = $this->buatItem('READY', null);
+        $this->putJson("/item-alat/edit/{$lama}", $this->formItem(['kode_unik' => 'NCU-1', 'last_unit' => null]))
+            ->assertUnprocessable()->assertJsonValidationErrors('last_unit');
+        $this->putJson("/item-alat/edit/{$lama}", $this->formItem(['kode_unik' => 'NCU-1', 'last_unit' => 'igd']))
+            ->assertOk()->assertJsonPath('item.last_unit', 'IGD');
+
+        // Ruangan alat KELUAR terkunci, jadi data lama tanpa ruangan tetap bisa diedit kode uniknya.
+        $keluar = $this->buatItem('KELUAR', null);
+        $this->putJson("/item-alat/edit/{$keluar}", $this->formItem(['kode_unik' => 'NCU-KELUAR', 'status' => 'KELUAR', 'last_unit' => null]))
+            ->assertOk();
+        $this->assertDatabaseHas('cssd_items', ['id' => $keluar, 'kode_unik' => 'NCU-KELUAR', 'last_unit' => null]);
     }
 
     public function test_edit_item_lama_wajib_memperbaiki_ruangan_kecuali_alat_keluar(): void

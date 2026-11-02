@@ -167,7 +167,10 @@
             }
 
             // Ruangan alat KELUAR dikunci dan dikirim apa adanya; selain itu wajib nama dari daftar SIMRS.
-            if (last_unit !== "" && !$("#lastunit").prop('disabled') && daftarunit.length > 0) {
+            if (last_unit === "" && !$("#lastunit").prop('disabled')) {
+                $("#unitdropdownwrap").after('<span class="error-message text-red-500">Ruangan wajib dipilih dari daftar SIMRS</span>');
+                isValid = false;
+            } else if (last_unit !== "" && !$("#lastunit").prop('disabled') && daftarunit.length > 0) {
                 var unit = cariunit(last_unit);
 
                 if (!unit) {
