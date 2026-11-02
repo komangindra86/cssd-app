@@ -166,6 +166,19 @@
                 isValid = false;
             }
 
+            // Ruangan alat KELUAR dikunci dan dikirim apa adanya; selain itu wajib nama dari daftar SIMRS.
+            if (last_unit !== "" && !$("#lastunit").prop('disabled') && daftarunit.length > 0) {
+                var unit = cariunit(last_unit);
+
+                if (!unit) {
+                    $("#unitdropdownwrap").after('<span class="error-message text-red-500">Pilih ruangan dari daftar SIMRS, jangan diketik bebas</span>');
+                    isValid = false;
+                } else {
+                    last_unit = unit.nama;
+                    $("#lastunit").val(unit.nama);
+                }
+            }
+
             if (!isValid) {
                 return null;
             }
@@ -303,6 +316,14 @@
             if (buka !== false) {
                 $("#listunit").removeClass('hidden');
             }
+        }
+
+        function cariunit(nama) {
+            var kunci = String(nama || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+            return daftarunit.find(function(unit) {
+                return String(unit.nama || '').trim().replace(/\s+/g, ' ').toLowerCase() === kunci;
+            });
         }
 
         function pilihunit(nama) {

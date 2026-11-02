@@ -3,6 +3,7 @@
 namespace Tests\Support;
 
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 
 trait CssdSchema
@@ -48,6 +49,19 @@ trait CssdSchema
         ] as $migration) {
             $this->migrasi($migration);
         }
+
+        $this->fakeRuanganSimrs();
+    }
+
+    /** Respons palsu API ruangan SIMRS; bisa diganti per tes (mis. untuk simulasi gangguan). */
+    private $responsRuanganSimrs = null;
+
+    private function fakeRuanganSimrs(array $nama = ['IGD', 'SANDAT', 'POLI KULIT', 'PERINATOLOGI', 'NICU', 'RAWAT INAP PICU/NICU']): void
+    {
+        config(['services.bali_mandara.token' => 'token-uji']);
+        $this->responsRuanganSimrs = Http::response(['metaData' => ['code' => 200], 'response' => collect($nama)
+            ->map(fn ($ruangan, $i) => ['value' => 900 + $i, 'label' => $ruangan, 'objectdepartemenfk' => 16])->all()]);
+        Http::fake(['*get-ruangan*' => fn () => value($this->responsRuanganSimrs)]);
     }
 
     private function migrasi(string $file): void

@@ -47,6 +47,7 @@ function form() {
     const ctx = vm.createContext({ document: {}, $, console, alert() {}, confirm: () => true, window: { scrollTo() {} } });
     vm.runInContext(blade.match(/<script>([\s\S]*?)<\/script>/)[1], ctx);
     ctx.getpegawai = () => {};
+    ctx.getruangan = () => {};
     ready();
     values.set('#petugaspenerimapencucian', 'Penerima Uji');
     values.set('#petugaspengemasan', 'Pengemasan Uji');
@@ -136,6 +137,19 @@ test('Sterilisasi awal DIRTY tidak membutuhkan pasien atau transaksi distribusi'
     assert.equal(data.cssd_keluar_log_id, '');
     assert.equal(data.no_rm, '');
     assert.equal(f.values.get('#prosesawal'), '1');
+});
+
+test('Sterilisasi awal hanya menerima ruangan dari daftar SIMRS dan memakai nama resminya', () => {
+    const f = form();
+    f.ctx.daftarruangan = [{ id: '303', nama: 'PERINATOLOGI' }, { id: '305', nama: 'RAWAT INAP PICU/NICU' }];
+    f.values.set('#kodeunik', 'CPAP-UJI');
+    f.ctx.carialat();
+    f.requests[0].success(item(null, { status: 'DIRTY', jumlah_keluar: 0, keluar_terakhir: null, last_unit: 'Perina' }));
+    assert.equal(f.ctx.nilai(), null);
+
+    f.values.set('#namasectionpengguna', '  perinatologi ');
+    assert.equal(f.ctx.nilai().nama_section_pengguna, 'PERINATOLOGI');
+    assert.equal(f.values.get('#namasectionpengguna'), 'PERINATOLOGI');
 });
 
 test('Transaksi yang ditolak server tidak bisa dikirim ulang tanpa dipilih kembali', () => {

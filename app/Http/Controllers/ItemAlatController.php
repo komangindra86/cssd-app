@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\RuanganSimrs;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -153,6 +154,8 @@ class ItemAlatController extends Controller
             'last_unit' => 'nullable|string|max:255',
         ], $this->pesanValidasi());
 
+        $request->merge(['last_unit' => app(RuanganSimrs::class)->namaResmi($request->last_unit, 'last_unit')]);
+
         $id = DB::table('cssd_items')->insertGetId([
             'bmhp_id' => $request->bmhp_id,
             'kode_unik' => $request->kode_unik,
@@ -225,6 +228,11 @@ class ItemAlatController extends Controller
         }
 
         $this->validasiPerubahanStatus($request, $item);
+
+        // Ruangan alat KELUAR sudah dikunci di atas; selain itu ruangan wajib sesuai daftar SIMRS.
+        if ($item->status !== 'KELUAR') {
+            $request->merge(['last_unit' => app(RuanganSimrs::class)->namaResmi($request->last_unit, 'last_unit')]);
+        }
 
         DB::transaction(function () use ($request, $item) {
             DB::table('cssd_items')

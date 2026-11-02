@@ -39,7 +39,8 @@
                 </div>
                 <div>
                     <label class="mb-2 block text-sm font-medium text-slate-700">Ruangan Alat</label>
-                    <input type="text" id="namasectionpengguna" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs" placeholder="Wajib jika belum ada riwayat keluar">
+                    <input type="text" id="namasectionpengguna" list="listruanganalat" autocomplete="off" class="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-xs" placeholder="Pilih ruangan dari daftar">
+                    <datalist id="listruanganalat"></datalist>
                 </div>
                 <div>
                     <label for="namaruanganpasien" class="mb-2 block text-sm font-medium text-slate-700">Ruangan Pasien</label>
@@ -149,6 +150,7 @@
         var tabelperawatmasuk;
         var pencarianalat = null;
         var urutanpencarian = 0;
+        var daftarruangan = [];
         var sedangmenyimpan = false;
 
         $(document).ready(function() {
@@ -158,6 +160,7 @@
             hitungtanggalexpire();
             datatableperawatmasuk();
             getpegawai();
+            getruangan();
             $("#kodeunik").on('keypress', function(e) {
                 if (e.which === 13) carialat();
             });
@@ -338,6 +341,12 @@
                 if (nama_dpjp === "") { $("#namadpjp").after('<span class="error-message text-red-500">Nama DPJP wajib diisi</span>'); isValid = false; }
                 if (nama_perawat === "") { $("#namaperawat").after('<span class="error-message text-red-500">Nama perawat wajib diisi</span>'); isValid = false; }
             }
+            // Sterilisasi awal menetapkan ruangan alat, jadi wajib nama dari daftar SIMRS.
+            if (proses_awal === "1" && nama_section_pengguna !== "" && daftarruangan.length > 0) {
+                var ruangan = cariruangan(nama_section_pengguna);
+                if (!ruangan) { $("#namasectionpengguna").after('<span class="error-message text-red-500">Pilih ruangan dari daftar SIMRS, jangan diketik bebas</span>'); isValid = false; }
+                else { nama_section_pengguna = ruangan.nama; $("#namasectionpengguna").val(ruangan.nama); }
+            }
             if (perlu_steril && metode_steril === "") { $("#metodesteril").after('<span class="error-message text-red-500">Metode sterilisasi wajib diisi</span>'); isValid = false; }
             if (perlu_steril && tanggal_steril === "") { $("#tanggalsteril").after('<span class="error-message text-red-500">Tanggal sterilisasi wajib diisi</span>'); isValid = false; }
             if (perlu_steril && masa_expire_bulan === "") { $("#masaexpirebulan").after('<span class="error-message text-red-500">Masa expire steril wajib dipilih</span>'); isValid = false; }
@@ -456,6 +465,29 @@
                 paginate: { previous: 'Previous', next: 'Next' },
                 zeroRecords: 'Data tidak ditemukan'
             };
+        }
+
+        function cariruangan(nama) {
+            var kunci = String(nama || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+            return daftarruangan.find(function(item) {
+                return String(item.nama || '').trim().replace(/\s+/g, ' ').toLowerCase() === kunci;
+            });
+        }
+
+        function getruangan() {
+            $.get('/operasional/get-ruangan', function(data) {
+                daftarruangan = data.ruangan || [];
+                var pilihan = '';
+
+                daftarruangan.forEach(function(item) {
+                    pilihan += '<option value="' + atribut(item.nama) + '"></option>';
+                });
+
+                $("#listruanganalat").html(pilihan);
+            }).fail(function(xhr) {
+                console.log('Gagal mengambil data ruangan', xhr.responseText);
+            });
         }
 
         function getpegawai() {

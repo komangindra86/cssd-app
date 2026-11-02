@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\OperasionalCssdController;
 use App\Models\User;
+use App\Services\RuanganSimrs;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Tests\TestCase;
@@ -53,14 +55,16 @@ class IgdPasienTest extends TestCase
 
     public function test_nama_ruangan_igd_dari_api_dirapikan(): void
     {
-        $method = new \ReflectionMethod(OperasionalCssdController::class, 'normalisasiRuangan');
-        $ruangan = $method->invoke(new OperasionalCssdController(), ['response' => [
+        config(['services.bali_mandara.token' => 'token-uji']);
+        Http::fake(['*get-ruangan*' => Http::response(['response' => [
             ['value' => 322, 'label' => 'IGD ', 'objectdepartemenfk' => 9],
             ['value' => 312, 'label' => 'RUANG TRANSIT IGD', 'objectdepartemenfk' => 16],
-        ]]);
+        ]])]);
+        $ruangan = app(RuanganSimrs::class)->semua();
 
-        $this->assertSame(['id' => 322, 'nama' => 'IGD', 'departemen_id' => 9], $ruangan[0]);
-        $this->assertSame(16, $ruangan[1]['departemen_id']);
+        $this->assertSame(['id' => '322', 'nama' => 'IGD', 'departemen_id' => '9'], $ruangan[0]);
+        $this->assertSame('16', $ruangan[1]['departemen_id']);
+        $this->assertSame('IGD', app(RuanganSimrs::class)->cari(' igd ')['nama']);
     }
 
     public function test_pasien_igd_harus_login_dan_akses_ruangan_lain_ditolak(): void

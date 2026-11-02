@@ -121,6 +121,25 @@ class PerawatRuanganTest extends TestCase
         $this->assertStringNotContainsString('Pasien Uji Sandat', $response->getContent());
     }
 
+    public function test_respons_pasien_admin_tidak_memuat_data_mentah_simrs(): void
+    {
+        $request = Request::create('/operasional/igd-pasien', 'GET', ['ruanganfk' => '322', 'tanggal' => '2026-09-22']);
+        $user = User::factory()->create(['role' => 'super_admin']);
+        $request->setUserResolver(fn () => $user);
+        $data = ['response' => ['data' => [[
+            'namaruangan' => 'IGD ', 'nocm' => ' RM-UJI-1 ', 'namapasien' => 'Pasien Uji', 'namalengkap' => 'Dokter Uji',
+            'alamatrmh' => 'ALAMAT-RAHASIA', 'noidentitas' => 'NIK-RAHASIA', 'nobpjs' => 'BPJS-RAHASIA',
+        ]]]];
+        $method = new \ReflectionMethod(OperasionalCssdController::class, 'responsePasienRuangan');
+        $response = $method->invoke(new OperasionalCssdController(), $request, $data);
+
+        foreach (['ALAMAT-RAHASIA', 'NIK-RAHASIA', 'BPJS-RAHASIA', 'alamatrmh'] as $rahasia) {
+            $this->assertStringNotContainsString($rahasia, $response->getContent());
+        }
+        $this->assertSame('IGD', $response->getData(true)['pasien'][0]['ruangan']);
+        $this->assertSame('RM-UJI-1', $response->getData(true)['data'][0]['no_rm']);
+    }
+
     public function test_perawat_dapat_menyimpan_kelayakan_ruangan_sendiri(): void
     {
         $layak = $this->buatDistribusi('IGD');

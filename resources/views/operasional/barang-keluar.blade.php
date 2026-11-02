@@ -148,6 +148,11 @@
             if (tanggal_keluar === "") { $("#tanggalkeluar").after('<span class="error-message text-red-500">Tanggal keluar wajib diisi</span>'); isValid = false; }
             if (jam_keluar === "") { $("#jamkeluar").after('<span class="error-message text-red-500">Jam keluar wajib diisi</span>'); isValid = false; }
             if (nama_section_pengguna === "") { $("#namasectionpengguna").after('<span class="error-message text-red-500">Nama ruangan wajib diisi</span>'); isValid = false; }
+            else if (daftarruangan.length > 0) {
+                var ruangan = cariruangan(nama_section_pengguna);
+                if (!ruangan) { $("#namasectionpengguna").after('<span class="error-message text-red-500">Pilih ruangan dari daftar SIMRS, jangan diketik bebas</span>'); isValid = false; }
+                else { nama_section_pengguna = ruangan.nama; $("#namasectionpengguna").val(ruangan.nama); }
+            }
             if (petugas === "") { $("#petugas").after('<span class="error-message text-red-500">Petugas CSSD wajib diisi</span>'); isValid = false; }
             if (perawat_penerima === "") { $("#perawatpenerima").after('<span class="error-message text-red-500">Perawat penerima wajib diisi</span>'); isValid = false; }
             if (!isValid) return null;
@@ -364,6 +369,14 @@
                 $("#listpegawai").html(pilihan);
             }).fail(function(xhr) {
                 console.log('Gagal mengambil data pegawai', xhr.responseText);
+            });
+        }
+
+        function cariruangan(nama) {
+            var kunci = String(nama || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+            return daftarruangan.find(function(item) {
+                return String(item.nama || '').trim().replace(/\s+/g, ' ').toLowerCase() === kunci;
             });
         }
 

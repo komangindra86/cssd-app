@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\RuanganSimrs;
 use Carbon\Carbon;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -444,7 +446,9 @@ class OperasionalCssdController extends Controller
             $tanggalExpireSteril = Carbon::parse($request->tanggal_steril)
                 ->addMonthsNoOverflow((int) $request->masa_expire_bulan)
                 ->toDateString();
-            $unitAwal = $request->nama_section_pengguna ?: ($item->last_unit ?? '-');
+            $unitAwal = app(RuanganSimrs::class)
+                ->namaResmi($request->nama_section_pengguna, 'nama_section_pengguna')
+                ?: ($item->last_unit ?? '-');
 
             DB::table('cssd_masuk_logs')->insert([
                 'cssd_item_id' => $request->cssd_item_id,
@@ -785,6 +789,12 @@ class OperasionalCssdController extends Controller
                 422
             );
         }
+
+        // Ruangan tujuan menjadi ruangan alat; harus nama resmi SIMRS agar cocok dengan ruangan akun perawat.
+        $request->merge([
+            'nama_section_pengguna' => app(RuanganSimrs::class)
+                ->namaResmi($request->nama_section_pengguna, 'nama_section_pengguna'),
+        ]);
 
         $jumlah = DB::transaction(function () use ($request, $itemIds) {
             foreach ($itemIds as $itemId) {
@@ -1823,26 +1833,17 @@ class OperasionalCssdController extends Controller
         $data = json_decode($response, true);
 
         if ($httpCode >= 400) {
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Service get pegawai mengembalikan error.',
-                    'status' => $httpCode,
-                    'data' => $data ?: $response,
-                ],
-                $httpCode
-            );
+            return $this->responseErrorSimrs('get pegawai', $httpCode, $response);
         }
-        // dd($data);
 
+        // Data mentah pegawai memuat NIK, NPWP, rekening, dan alamat; browser hanya butuh nama.
         return response()->json([
             'success' => true,
-            'data' => $data ?: $response,
             'pegawai' => $this->normalisasiPegawai($data ?: []),
         ]);
     }
 
-    public function getruangan(Request $request)
+    public function getruangan(Request $request, RuanganSimrs $ruanganSimrs)
     {
         $user = $request->user();
 
@@ -1860,81 +1861,19 @@ class OperasionalCssdController extends Controller
             return response()->json(['success' => true, 'data' => $ruangan, 'ruangan' => $ruangan]);
         }
 
-        $token = config('services.bali_mandara.token');
-        $url = config('services.bali_mandara.ruangan_url');
-
-        if (!$token || !$url) {
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Konfigurasi API ruangan belum lengkap di .env.',
-                ],
-                422
-            );
-        }
-
-        $curl = curl_init();
-        $headers = [$this->formatHeader('token', $token)];
-
-        if (config('services.bali_mandara.cookie')) {
-            $headers[] = $this->formatHeader(
-                'Cookie',
-                config('services.bali_mandara.cookie')
-            );
-        }
-
-        curl_setopt_array($curl, [
-            CURLOPT_URL => $url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => '',
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => (int) config(
-                'services.bali_mandara.timeout',
-                30
-            ),
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => 'GET',
-            CURLOPT_HTTPHEADER => $headers,
-        ]);
-
-        $response = curl_exec($curl);
-
-        if ($response === false) {
-            $error = curl_error($curl);
-            curl_close($curl);
-
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Gagal koneksi ke service get ruangan.',
-                    'error' => $error,
-                ],
-                500
-            );
-        }
-
-        $httpCode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        curl_close($curl);
-
-        $data = json_decode($response, true);
-
-        if ($httpCode >= 400) {
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Service get ruangan mengembalikan error.',
-                    'status' => $httpCode,
-                    'data' => $data ?: $response,
-                ],
-                $httpCode
-            );
+        try {
+            $ruangan = $ruanganSimrs->semua();
+        } catch (\RuntimeException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Daftar ruangan SIMRS tidak bisa dimuat. Coba lagi beberapa saat.',
+            ], 502);
         }
 
         return response()->json([
             'success' => true,
-            'data' => $data ?: $response,
-            'ruangan' => $this->normalisasiRuangan($data ?: []),
+            'data' => $ruangan,
+            'ruangan' => $ruangan,
         ]);
     }
 
@@ -2012,18 +1951,10 @@ class OperasionalCssdController extends Controller
         $data = json_decode($response, true);
 
         if ($httpCode >= 400) {
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Service rawat inap mengembalikan error.',
-                    'status' => $httpCode,
-                    'data' => $request->user()->dibatasiRuangan() ? null : ($data ?: $response),
-                ],
-                $httpCode
-            );
+            return $this->responseErrorSimrs('rawat inap', $httpCode, $response);
         }
 
-        return $this->responsePasienRuangan($request, $data, $response);
+        return $this->responsePasienRuangan($request, $data);
     }
 
     public function getrawatjalan(Request $request)
@@ -2101,18 +2032,10 @@ class OperasionalCssdController extends Controller
         $data = json_decode($response, true);
 
         if ($httpCode >= 400) {
-            return response()->json(
-                [
-                    'success' => false,
-                    'message' => 'Service rawat jalan mengembalikan error.',
-                    'status' => $httpCode,
-                    'data' => $request->user()->dibatasiRuangan() ? null : ($data ?: $response),
-                ],
-                $httpCode
-            );
+            return $this->responseErrorSimrs('rawat jalan', $httpCode, $response);
         }
 
-        return $this->responsePasienRuangan($request, $data, $response);
+        return $this->responsePasienRuangan($request, $data);
     }
 
     public function getigd(Request $request)
@@ -2178,10 +2101,25 @@ class OperasionalCssdController extends Controller
             ], 502);
         }
 
-        return $this->responsePasienRuangan($request, $data, $response);
+        return $this->responsePasienRuangan($request, $data);
     }
 
-    private function responsePasienRuangan(Request $request, $data, $response)
+    private function responseErrorSimrs(string $layanan, int $httpCode, string $response)
+    {
+        // Isi respons SIMRS bisa memuat data pribadi; cukup dicatat di log server, tidak dikirim ke browser.
+        Log::warning('Service SIMRS ' . $layanan . ' mengembalikan error', [
+            'status' => $httpCode,
+            'response' => mb_substr($response, 0, 2000),
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Service ' . $layanan . ' mengembalikan error.',
+            'status' => $httpCode,
+        ], $httpCode);
+    }
+
+    private function responsePasienRuangan(Request $request, $data)
     {
         $pasien = $this->normalisasiRawatInap($data ?: []);
 
@@ -2205,9 +2143,10 @@ class OperasionalCssdController extends Controller
             return $row;
         });
 
+        // Data mentah pasien memuat alamat, NIK, dan no. BPJS; browser hanya butuh hasil normalisasi.
         return response()->json([
             'success' => true,
-            'data' => $request->user()->dibatasiRuangan() ? $pasien : ($data ?: $response),
+            'data' => $pasien,
             'pasien' => $pasien,
         ]);
     }
@@ -2307,37 +2246,6 @@ class OperasionalCssdController extends Controller
             ->values();
     }
 
-    private function normalisasiRuangan($data)
-    {
-        $rows = $this->ambilListApi($data);
-
-        return collect($rows)
-            ->map(function ($row) {
-                if (!is_array($row)) {
-                    return null;
-                }
-
-                $nama = $row['label']
-                    ?? $row['namaruangan']
-                    ?? $row['nama_ruangan']
-                    ?? $row['nama']
-                    ?? $row['text']
-                    ?? null;
-
-                if (!$nama) {
-                    return null;
-                }
-
-                return [
-                    'id' => $row['id'] ?? $row['value'] ?? $row['idruangan'] ?? $row['id_ruangan'] ?? $nama,
-                    'nama' => trim($nama),
-                    'departemen_id' => $row['objectdepartemenfk'] ?? null,
-                ];
-            })
-            ->filter()
-            ->values();
-    }
-
     private function normalisasiRawatInap($data)
     {
         $rows = $this->ambilListApi($data);
@@ -2348,11 +2256,12 @@ class OperasionalCssdController extends Controller
                     return null;
                 }
 
+                // SIMRS kadang mengirim spasi di akhir nama ruangan (mis. "IGD "), jadi semua nilai dirapikan.
                 return [
-                    'ruangan' => $row['namaruangan'] ?? '',
-                    'no_rm' => $row['nocm'] ?? '',
-                    'nama_pasien' => $row['namapasien'] ?? '',
-                    'nama_dpjp' => $row['namalengkap'] ?? '',
+                    'ruangan' => trim((string) ($row['namaruangan'] ?? '')),
+                    'no_rm' => trim((string) ($row['nocm'] ?? '')),
+                    'nama_pasien' => trim((string) ($row['namapasien'] ?? '')),
+                    'nama_dpjp' => trim((string) ($row['namalengkap'] ?? '')),
                 ];
             })
             ->filter(function ($row) {
