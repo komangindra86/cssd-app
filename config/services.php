@@ -33,6 +33,14 @@ return [
         'timeout' => env('BALI_MANDARA_TIMEOUT', 30),
     ],
 
+    // API SIMRS bertanda tangan HMAC (riwayat ruangan pasien per tanggal).
+    'simrs_api' => [
+        'url' => env('SIMRS_API_URL'),
+        'token' => env('SIMRS_API_TOKEN'),
+        'secret' => env('SIMRS_API_SECRET'),
+        'timeout' => env('SIMRS_API_TIMEOUT', 30),
+    ],
+
     'ses' => [
         'key' => env('AWS_ACCESS_KEY_ID'),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),

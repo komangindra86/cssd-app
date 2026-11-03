@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\PegawaiSimrs;
 use App\Services\RuanganSimrs;
+use App\Services\SimrsApi;
 use Carbon\Carbon;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
@@ -1877,13 +1879,29 @@ class OperasionalCssdController extends Controller
         ]);
     }
 
-    public function getrawatinap(Request $request)
+    public function getrawatinap(Request $request, SimrsApi $simrsApi)
     {
         $this->validasiAksesPasienRuangan($request);
         $request->validate([
             'ruanganfk' => 'nullable|string|max:100',
             'tanggal' => 'nullable|date_format:Y-m-d',
         ]);
+
+        // API riwayat memuat pasien yang berada di ruangan pada tanggal itu, termasuk yang sudah pindah/pulang.
+        if ($simrsApi->aktif()) {
+            if (!$request->filled('ruanganfk')) {
+                return response()->json(['success' => true, 'pasien' => []]);
+            }
+
+            try {
+                $rows = $simrsApi->riwayatRawatInap($request->ruanganfk, $request->tanggal ?: now()->toDateString());
+            } catch (\RuntimeException $e) {
+                return response()->json(['success' => false, 'message' => $e->getMessage()], 502);
+            }
+
+            return $this->responsePasienRuangan($request, ['data' => $this->isiDpjpRiwayat($rows)]);
+        }
+
         $token = config('services.bali_mandara.token');
         $url = $this->urlRawatInap($request->ruanganfk);
 
@@ -2104,6 +2122,22 @@ class OperasionalCssdController extends Controller
         return $this->responsePasienRuangan($request, $data);
     }
 
+    /**
+     * Di API riwayat, namalengkap bukan DPJP; DPJP registrasi ada di objectpegawaifk dan namanya diambil dari daftar pegawai.
+     */
+    private function isiDpjpRiwayat(array $rows): array
+    {
+        try {
+            $dokter = app(PegawaiSimrs::class)->namaById();
+        } catch (\RuntimeException $e) {
+            Log::warning('Daftar pegawai SIMRS tidak bisa dimuat untuk DPJP riwayat rawat inap', ['error' => $e->getMessage()]);
+            $dokter = [];
+        }
+
+        // DPJP yang tidak ditemukan dikosongkan; perawat tidak bisa menyimpan sampai data SIMRS lengkap.
+        return array_map(fn ($row) => ['namalengkap' => $dokter[(string) ($row['objectpegawaifk'] ?? '')] ?? ''] + $row, $rows);
+    }
+
     private function responseErrorSimrs(string $layanan, int $httpCode, string $response)
     {
         // Isi respons SIMRS bisa memuat data pribadi; cukup dicatat di log server, tidak dikirim ke browser.
@@ -2257,16 +2291,26 @@ class OperasionalCssdController extends Controller
                 }
 
                 // SIMRS kadang mengirim spasi di akhir nama ruangan (mis. "IGD "), jadi semua nilai dirapikan.
-                return [
-                    'ruangan' => trim((string) ($row['namaruangan'] ?? '')),
+                // API riwayat rawat inap memakai ruanganDiTanggalItu: ruangan pasien pada tanggal yang dipilih.
+                $pasien = [
+                    'ruangan' => trim((string) ($row['ruanganDiTanggalItu'] ?? $row['namaruangan'] ?? '')),
                     'no_rm' => trim((string) ($row['nocm'] ?? '')),
                     'nama_pasien' => trim((string) ($row['namapasien'] ?? '')),
                     'nama_dpjp' => trim((string) ($row['namalengkap'] ?? '')),
                 ];
+
+                if (array_key_exists('ruanganDiTanggalItu', $row)) {
+                    $pasien['masuk_ruangan'] = filled($row['tglmasuk'] ?? null) ? substr((string) $row['tglmasuk'], 0, 10) : null;
+                    $pasien['ruangan_sekarang'] = trim((string) ($row['ruanganSekarang'] ?? '')) ?: null;
+                }
+
+                return $pasien;
             })
             ->filter(function ($row) {
                 return $row['ruangan'] !== '' && $row['no_rm'] !== '';
             })
+            // Catatan SIMRS yang tidak pernah ditutup bisa bertahun-tahun; pasien yang baru masuk ditampilkan lebih dulu.
+            ->sortByDesc(fn ($row) => $row['masuk_ruangan'] ?? '')
             ->values();
     }
 

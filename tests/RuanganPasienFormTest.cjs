@@ -98,3 +98,23 @@ test('Cetak dan Excel memuat kedua ruangan dengan jumlah kolom sesuai tabel', ()
         assert.equal([...table.matchAll(/<th\s/g)].length, columns.length);
     }
 });
+
+test('Daftar pasien riwayat rawat inap menampilkan tanggal masuk dan ruangan sekarang', () => {
+    const { ctx } = form('operasional/input-perawat.blade.php');
+    const opsi = [];
+    const el = { empty() { return this; }, append(o) { if (o.label !== undefined) opsi.push(o.label); return this; }, val() { return ''; }, prop() { return this; } };
+    ctx.$ = selector => selector === '<option>'
+        ? { label: undefined, val() { return this; }, text(t) { this.label = t; return this; } }
+        : el;
+    ctx.daftarpasienrawatinap = [
+        { pasien_token: 'a', no_rm: 'RM-1', nama_pasien: 'Pasien Pindah', nama_dpjp: 'dr. Uji', ruangan: 'ISOLASI JEPUN', ruangan_sekarang: 'KASUARI', masuk_ruangan: '2026-10-12' },
+        { pasien_token: 'b', no_rm: 'RM-2', nama_pasien: 'Pasien Tetap', nama_dpjp: 'dr. Uji', ruangan: 'ISOLASI JEPUN', ruangan_sekarang: 'ISOLASI JEPUN', masuk_ruangan: '2026-10-13' },
+        { pasien_token: 'c', no_rm: 'RM-3', nama_pasien: 'Pasien IGD', nama_dpjp: '', ruangan: 'IGD' },
+    ];
+    ctx.rendernormrawatinap();
+    assert.deepEqual(opsi.slice(1), [
+        'RM-1 - Pasien Pindah | dr. Uji | masuk 12-10-2026 | sekarang di KASUARI',
+        'RM-2 - Pasien Tetap | dr. Uji | masuk 13-10-2026',
+        'RM-3 - Pasien IGD | DPJP belum tersedia',
+    ]);
+});

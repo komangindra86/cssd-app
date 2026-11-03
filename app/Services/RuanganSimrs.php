@@ -2,33 +2,11 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
-class RuanganSimrs
+class RuanganSimrs extends DaftarSimrs
 {
-    private const CACHE = 'simrs.ruangan';
-    private const CACHE_CADANGAN = 'simrs.ruangan.cadangan';
-
-    public function semua(): Collection
-    {
-        return collect(Cache::remember(self::CACHE, now()->addHour(), function () {
-            try {
-                $ruangan = $this->ambil();
-            } catch (RuntimeException $e) {
-                // SIMRS sedang gangguan: pakai daftar terakhir yang berhasil dimuat.
-                return Cache::get(self::CACHE_CADANGAN) ?? throw $e;
-            }
-
-            Cache::forever(self::CACHE_CADANGAN, $ruangan);
-
-            return $ruangan;
-        }));
-    }
-
     public function cari(?string $nama): ?array
     {
         $kunci = $this->kunci($nama);
@@ -62,46 +40,21 @@ class RuanganSimrs
         return $ruangan['nama'];
     }
 
-    private function kunci(?string $nama): string
+    protected function cacheKey(): string
     {
-        return mb_strtolower(preg_replace('/\s+/u', ' ', trim((string) $nama)));
+        return 'simrs.ruangan';
     }
 
-    private function ambil(): array
+    protected function url(): ?string
     {
-        $url = config('services.bali_mandara.ruangan_url');
-        $token = config('services.bali_mandara.token');
+        return config('services.bali_mandara.ruangan_url');
+    }
 
-        if (!$url || !$token) {
-            throw new RuntimeException('Konfigurasi API ruangan belum lengkap.');
-        }
-
-        $headers = ['token' => $this->nilaiHeader('token', $token)];
-
-        if ($cookie = config('services.bali_mandara.cookie')) {
-            $headers['Cookie'] = $this->nilaiHeader('Cookie', $cookie);
-        }
-
-        try {
-            $response = Http::withHeaders($headers)
-                ->timeout(max(1, (int) config('services.bali_mandara.timeout', 30)))
-                ->get($url);
-        } catch (\Throwable $e) {
-            throw new RuntimeException('Gagal koneksi ke service ruangan.', 0, $e);
-        }
-
-        $json = $response->json();
-        $rows = $json['response'] ?? $json['data'] ?? $json;
-
-        if ($response->failed() || !is_array($rows) || !array_is_list($rows)) {
-            throw new RuntimeException('Respons service ruangan tidak valid.');
-        }
-
-        $ruangan = collect($rows)
+    protected function normalisasi(array $rows): array
+    {
+        return collect($rows)
             ->map(function ($row) {
-                $nama = is_array($row)
-                    ? ($row['label'] ?? $row['namaruangan'] ?? $row['nama_ruangan'] ?? $row['nama'] ?? $row['text'] ?? null)
-                    : null;
+                $nama = $row['label'] ?? $row['namaruangan'] ?? $row['nama_ruangan'] ?? $row['nama'] ?? $row['text'] ?? null;
 
                 return $nama ? [
                     'id' => (string) ($row['id'] ?? $row['value'] ?? $row['idruangan'] ?? $row['id_ruangan'] ?? $nama),
@@ -112,16 +65,10 @@ class RuanganSimrs
             ->filter()
             ->values()
             ->all();
-
-        if (empty($ruangan)) {
-            throw new RuntimeException('Daftar ruangan SIMRS kosong.');
-        }
-
-        return $ruangan;
     }
 
-    private function nilaiHeader(string $nama, string $nilai): string
+    private function kunci(?string $nama): string
     {
-        return stripos($nilai, $nama . ':') === 0 ? trim(substr($nilai, strlen($nama) + 1)) : $nilai;
+        return mb_strtolower(preg_replace('/\s+/u', ' ', trim((string) $nama)));
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\OperasionalCssdController;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Tests\Support\CssdSchema;
 use Tests\TestCase;
 
@@ -138,6 +139,34 @@ class PerawatRuanganTest extends TestCase
         }
         $this->assertSame('IGD', $response->getData(true)['pasien'][0]['ruangan']);
         $this->assertSame('RM-UJI-1', $response->getData(true)['data'][0]['no_rm']);
+    }
+
+    public function test_pasien_yang_sudah_pindah_tetap_bisa_dipilih_dengan_ruangan_pada_tanggal_pemakaian(): void
+    {
+        config([
+            'services.simrs_api' => ['url' => 'https://apisimrs.example.test', 'token' => 't', 'secret' => 's', 'timeout' => 5],
+            'services.bali_mandara.pegawai_url' => 'https://simrs.example.test/pegawai',
+        ]);
+        Http::fake([
+            'apisimrs.example.test/*' => Http::response(['success' => true, 'data' => [
+                ['nocm' => 'RM-PINDAH', 'namapasien' => 'Pasien Pindah', 'namalengkap' => 'Petugas Input', 'objectpegawaifk' => 7,
+                    'ruanganDiTanggalItu' => 'IGD', 'ruanganSekarang' => 'SANDAT', 'tglmasuk' => '2026-09-21 10:00:00', 'tglkeluar' => '2026-09-23 09:00:00'],
+                ['nocm' => 'RM-LAIN', 'namapasien' => 'Pasien Ruangan Lain', 'namalengkap' => 'Petugas Input', 'objectpegawaifk' => 7,
+                    'ruanganDiTanggalItu' => 'SANDAT', 'ruanganSekarang' => 'SANDAT', 'tglmasuk' => '2026-09-20 10:00:00', 'tglkeluar' => null],
+            ]]),
+            'simrs.example.test/pegawai*' => Http::response(['response' => [['id' => 7, 'namalengkap' => 'Dokter Uji']]]),
+        ]);
+        $item = $this->buatDistribusi('IGD');
+        $this->actingAs($this->perawat());
+
+        $pasien = $this->getJson('/operasional/rawat-inap?ruanganfk=101&tanggal=2026-09-22')->assertOk()
+            ->assertJsonCount(1, 'pasien')->assertJsonPath('pasien.0.ruangan_sekarang', 'SANDAT')->json('pasien.0');
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']], ['pasien_token' => $pasien['pasien_token']]))->assertOk();
+
+        $this->assertDatabaseHas('cssd_keluar_logs', [
+            'id' => $item['log'], 'no_rm' => 'RM-PINDAH', 'nama_ruangan_pasien' => 'IGD', 'tanggal_penggunaan' => '2026-09-22',
+            'nama_dpjp' => 'Dokter Uji',
+        ]);
     }
 
     public function test_perawat_dapat_menyimpan_kelayakan_ruangan_sendiri(): void

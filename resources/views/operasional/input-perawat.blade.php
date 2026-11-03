@@ -534,7 +534,17 @@
             var select = $("#norm").empty().append($('<option>').val('').text(pesan));
 
             daftar.forEach(function(item) {
-                select.append($('<option>').val(item.pasien_token).text(item.no_rm + ' - ' + item.nama_pasien + ' | ' + (item.nama_dpjp || 'DPJP belum tersedia')));
+                var keterangan = item.no_rm + ' - ' + item.nama_pasien + ' | ' + (item.nama_dpjp || 'DPJP belum tersedia');
+
+                // Data riwayat rawat inap: bantu perawat mengenali pasien yang sudah pindah atau catatan lama.
+                if (item.masuk_ruangan) {
+                    keterangan += ' | masuk ' + item.masuk_ruangan.split('-').reverse().join('-');
+                }
+                if (item.ruangan_sekarang && item.ruangan_sekarang.toLowerCase() !== String(item.ruangan || '').toLowerCase()) {
+                    keterangan += ' | sekarang di ' + item.ruangan_sekarang;
+                }
+
+                select.append($('<option>').val(item.pasien_token).text(keterangan));
             });
 
             select.val(daftar.some(function(item) { return item.pasien_token === terpilih; }) ? terpilih : '');
