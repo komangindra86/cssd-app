@@ -220,7 +220,7 @@ class PerawatRuanganTest extends TestCase
         $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']]))->assertForbidden();
     }
 
-    public function test_log_lama_atau_sudah_dinilai_tidak_bisa_ditimpa(): void
+    public function test_log_distribusi_lama_tidak_bisa_ditimpa(): void
     {
         $item = $this->buatDistribusi('IGD');
         DB::table('cssd_keluar_logs')->where('id', $item['log'])->update(['hasil_uji_perawat' => 'LAYAK', 'no_rm' => 'RM-LAMA']);
@@ -237,10 +237,130 @@ class PerawatRuanganTest extends TestCase
         $this->assertDatabaseHas('cssd_items', ['id' => $item['item'], 'status' => 'KELUAR']);
 
         $this->postJson('/input-perawat/simpan', $this->penilaian([$baru]))->assertOk();
-        $this->postJson('/input-perawat/simpan', $this->penilaian([$baru], ['hasil_uji_perawat' => 'TIDAK LAYAK']))
-            ->assertUnprocessable();
         $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $baru, 'hasil_uji_perawat' => 'LAYAK']);
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $item['log'], 'no_rm' => 'RM-LAMA']);
+    }
+
+    public function test_perawat_dapat_merevisi_penilaian_sebelum_diterima_cssd(): void
+    {
+        $item = $this->buatDistribusi('IGD');
+        $this->actingAs($this->perawat());
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']]))->assertOk();
+
+        // Salah input LAYAK, direvisi menjadi TIDAK LAYAK: alat masuk DISPOSE.
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']], [
+            'hasil_uji_perawat' => 'TIDAK LAYAK', 'catatan' => 'Selang bocor', 'nama_perawat' => 'Perawat Revisi',
+        ]))->assertOk();
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $item['log'], 'hasil_uji_perawat' => 'TIDAK LAYAK', 'nama_perawat' => 'Perawat Revisi']);
+        $this->assertDatabaseHas('cssd_items', ['id' => $item['item'], 'status' => 'DISPOSE']);
+        $this->assertDatabaseHas('cssd_logs', ['cssd_item_id' => $item['item'], 'status' => 'DISPOSE']);
+        $this->assertTrue(DB::table('cssd_logs')->where('keterangan', 'like', 'Revisi penilaian perawat (sebelumnya LAYAK)%')->exists());
+
+        // Salah lagi, dikembalikan ke LAYAK: alat batal dibuang dan kembali menunggu diterima CSSD.
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']]))->assertOk();
         $this->assertDatabaseHas('cssd_items', ['id' => $item['item'], 'status' => 'KELUAR']);
+        $this->assertTrue(DB::table('cssd_logs')->where('keterangan', 'like', 'Revisi penilaian perawat (sebelumnya TIDAK LAYAK)%')->exists());
+        $this->assertSame(1, DB::table('cssd_ujis')->where('cssd_keluar_log_id', $item['log'])->count());
+        $this->assertDatabaseHas('cssd_ujis', ['cssd_keluar_log_id' => $item['log'], 'hasil' => 'LAYAK']);
+
+        // Setelah diterima CSSD, penilaian terkunci.
+        DB::table('cssd_masuk_logs')->insert([
+            'cssd_item_id' => $item['item'], 'cssd_keluar_log_id' => $item['log'], 'unit_asal' => 'IGD',
+            'tanggal_masuk' => '2026-09-23', 'petugas' => 'Petugas CSSD',
+        ]);
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$item['log']], ['hasil_uji_perawat' => 'TIDAK LAYAK']))
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.cssd_keluar_log_ids.0', 'Item TEST-1 sudah diterima CSSD, penilaian tidak bisa direvisi lagi.');
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $item['log'], 'hasil_uji_perawat' => 'LAYAK']);
+        $this->assertDatabaseHas('cssd_items', ['id' => $item['item'], 'status' => 'KELUAR']);
+    }
+
+    public function test_batal_penilaian_mengembalikan_alat_ke_daftar_belum_dinilai(): void
+    {
+        $salahPilih = $this->buatDistribusi('IGD');
+        $tidakLayak = $this->buatDistribusi('IGD');
+        DB::table('kriteria_rusak')->insert(['id' => 3, 'nama' => 'Bocor', 'is_active' => true]);
+        $this->actingAs($this->perawat());
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$salahPilih['log']], ['catatan' => 'salah alat']))->assertOk();
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$tidakLayak['log']], ['hasil_uji_perawat' => 'TIDAK LAYAK', 'kriteria_rusak' => [3]]))->assertOk();
+
+        $this->postJson('/input-perawat/batal', ['cssd_keluar_log_id' => $salahPilih['log']])->assertOk()
+            ->assertJsonPath('message', 'Penilaian TEST-1 dibatalkan. Alat kembali ke daftar belum dinilai.');
+        $this->assertDatabaseHas('cssd_keluar_logs', [
+            'id' => $salahPilih['log'], 'hasil_uji_perawat' => null, 'no_rm' => '-', 'nama_pasien' => '-', 'nama_dpjp' => '-',
+            'nama_perawat' => '-', 'nama_ruangan_pasien' => null, 'catatan_uji_perawat' => null, 'tanggal_penggunaan' => '2026-09-22',
+        ]);
+        $this->assertDatabaseMissing('cssd_ujis', ['cssd_keluar_log_id' => $salahPilih['log']]);
+        $this->assertDatabaseHas('cssd_items', ['id' => $salahPilih['item'], 'status' => 'KELUAR']);
+        $this->assertTrue(DB::table('cssd_logs')->where('cssd_item_id', $salahPilih['item'])
+            ->where('keterangan', 'like', 'Penilaian perawat dibatalkan (sebelumnya LAYAK, No. RM RM-UJI)%')->exists());
+
+        // TIDAK LAYAK yang dibatalkan: alat batal dibuang.
+        $this->postJson('/input-perawat/batal', ['cssd_keluar_log_id' => $tidakLayak['log']])->assertOk();
+        $this->assertDatabaseHas('cssd_items', ['id' => $tidakLayak['item'], 'status' => 'KELUAR']);
+
+        // Keduanya kembali di daftar belum dinilai, hilang dari daftar revisi, dan bisa dinilai ulang.
+        $belum = collect($this->getJson('/operasional/keluar-data?belum_uji=1')->assertOk()->json())->pluck('cssd_keluar_log_id');
+        $this->assertEqualsCanonicalizing([$salahPilih['log'], $tidakLayak['log']], $belum->all());
+        $this->getJson('/operasional/kelayakan-revisi-data')->assertOk()->assertExactJson([]);
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$salahPilih['log']]))->assertOk();
+
+        // Belum dinilai tidak bisa dibatalkan lagi.
+        $this->postJson('/input-perawat/batal', ['cssd_keluar_log_id' => $tidakLayak['log']])
+            ->assertUnprocessable()->assertJsonValidationErrors('cssd_keluar_log_id');
+    }
+
+    public function test_batal_penilaian_ditolak_setelah_diterima_cssd_atau_dari_ruangan_lain(): void
+    {
+        $diterima = $this->buatDistribusi('IGD');
+        $ruanganLain = $this->buatDistribusi('SANDAT');
+        DB::table('cssd_keluar_logs')->where('id', $ruanganLain['log'])->update(['hasil_uji_perawat' => 'LAYAK', 'no_rm' => 'RM-SANDAT']);
+        $this->actingAs($this->perawat());
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$diterima['log']]))->assertOk();
+        DB::table('cssd_masuk_logs')->insert([
+            'cssd_item_id' => $diterima['item'], 'cssd_keluar_log_id' => $diterima['log'], 'unit_asal' => 'IGD',
+            'tanggal_masuk' => '2026-09-23', 'petugas' => 'Petugas CSSD',
+        ]);
+
+        $this->postJson('/input-perawat/batal', ['cssd_keluar_log_id' => $diterima['log']])->assertUnprocessable()
+            ->assertJsonPath('errors.cssd_keluar_log_id.0', 'Penilaian TEST-1 tidak bisa dibatalkan karena alat sudah diterima CSSD.');
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $diterima['log'], 'hasil_uji_perawat' => 'LAYAK', 'no_rm' => 'RM-UJI']);
+
+        $this->postJson('/input-perawat/batal', ['cssd_keluar_log_id' => $ruanganLain['log']])->assertForbidden();
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $ruanganLain['log'], 'no_rm' => 'RM-SANDAT']);
+
+        $this->actingAs(User::factory()->create(['role' => 'user_cssd']))
+            ->postJson('/input-perawat/batal', ['cssd_keluar_log_id' => $ruanganLain['log']])->assertForbidden();
+    }
+
+    public function test_daftar_revisi_hanya_berisi_penilaian_yang_masih_bisa_diubah(): void
+    {
+        $layak = $this->buatDistribusi('IGD');
+        $tidakLayak = $this->buatDistribusi('IGD');
+        $belumDinilai = $this->buatDistribusi('IGD');
+        $sudahDiterima = $this->buatDistribusi('IGD');
+        $diubahAdmin = $this->buatDistribusi('IGD');
+        $ruanganLain = $this->buatDistribusi('SANDAT');
+        DB::table('kriteria_rusak')->insert(['id' => 3, 'nama' => 'Bocor', 'is_active' => true]);
+
+        $this->actingAs($this->perawat());
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$layak['log'], $sudahDiterima['log'], $diubahAdmin['log']]))->assertOk();
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$tidakLayak['log']], ['hasil_uji_perawat' => 'TIDAK LAYAK', 'kriteria_rusak' => [3]]))->assertOk();
+        DB::table('cssd_keluar_logs')->where('id', $ruanganLain['log'])->update(['hasil_uji_perawat' => 'LAYAK']);
+        DB::table('cssd_masuk_logs')->insert([
+            'cssd_item_id' => $sudahDiterima['item'], 'cssd_keluar_log_id' => $sudahDiterima['log'], 'unit_asal' => 'IGD',
+            'tanggal_masuk' => '2026-09-23', 'petugas' => 'Petugas CSSD',
+        ]);
+        DB::table('cssd_items')->where('id', $diubahAdmin['item'])->update(['status' => 'READY']);
+
+        $data = collect($this->getJson('/operasional/kelayakan-revisi-data')->assertOk()->json());
+        $this->assertEqualsCanonicalizing([$layak['log'], $tidakLayak['log']], $data->pluck('cssd_keluar_log_id')->all());
+        $this->assertSame(['3'], $data->firstWhere('cssd_keluar_log_id', $tidakLayak['log'])['kriteria_rusak']);
+        $this->assertSame('RM-UJI', $data->firstWhere('cssd_keluar_log_id', $layak['log'])['no_rm']);
+
+        $this->getJson('/operasional/kelayakan-revisi-data?draw=1&length=1&start=0')->assertOk()
+            ->assertJsonPath('recordsTotal', 2)->assertJsonCount(1, 'data');
+        $this->assertNotContains($belumDinilai['log'], $data->pluck('cssd_keluar_log_id'));
     }
 
     public function test_super_admin_masih_bisa_menilai_barang_dari_ruangan_lain(): void

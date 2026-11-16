@@ -86,7 +86,9 @@ Route::middleware('auth')->group(function () {
     Route::middleware('role:super_admin,user_perawat')->group(function () {
         Route::get('/input-perawat', [OperasionalCssdController::class, 'perawat'])->name('input-perawat');
         Route::post('/input-perawat/simpan', [OperasionalCssdController::class, 'perawatSimpan']);
+        Route::post('/input-perawat/batal', [OperasionalCssdController::class, 'perawatBatal']);
         Route::get('/operasional/keluar-data', [OperasionalCssdController::class, 'keluarData']);
+        Route::get('/operasional/kelayakan-revisi-data', [OperasionalCssdController::class, 'perawatRevisiData']);
     });
 
     Route::middleware('admin')->group(function () {

@@ -16,6 +16,16 @@
         @endif
 
         <div class="mb-6 rounded border border-slate-200 bg-white">
+            <div id="boxrevisi" class="mx-6 mt-6 hidden rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900" role="status">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <b>Mode revisi:</b> <span id="infokoderevisi"></span>.
+                        Ubah data yang salah, lalu klik <b>Simpan Revisi</b>.
+                    </div>
+                    <button type="button" onclick="batalrevisi()" class="rounded border border-amber-400 bg-white px-3 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100">Batal Revisi</button>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 gap-4 p-6 lg:grid-cols-3">
                 <div>
                     <label class="mb-2 block text-sm font-medium text-slate-700">Tanggal Penggunaan</label>
@@ -112,6 +122,7 @@
                 </div>
             </div>
 
+            <div id="bagianbelumdinilai">
             <div class="border-t border-slate-200 px-6 py-4">
                 <h2 class="text-sm font-bold text-slate-800">Barang Sudah Dipakai / Belum Masuk CSSD</h2>
             </div>
@@ -135,9 +146,38 @@
                     </table>
                 </div>
             </div>
+            </div>
 
             <div class="grid grid-cols-6 px-6 pb-6 lg:grid-cols-1">
-                <button onclick="simpan()" @disabled(auth()->user()->dibatasiRuangan() && !auth()->user()->punyaRuangan()) class="rounded bg-teal-500 px-4 py-2 text-sm font-medium text-white shadow hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50">Simpan</button>
+                <button id="tombolsimpan" onclick="simpan()" @disabled(auth()->user()->dibatasiRuangan() && !auth()->user()->punyaRuangan()) class="rounded bg-teal-500 px-4 py-2 text-sm font-medium text-white shadow hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50">Simpan</button>
+            </div>
+        </div>
+
+        <div class="mb-6 rounded border border-slate-200 bg-white">
+            <div class="px-6 py-4">
+                <h2 class="text-sm font-bold text-slate-800">Sudah Dinilai, Masih Bisa Direvisi</h2>
+                <p class="mt-1 text-xs text-slate-500">
+                    Salah isi data? Klik <b>Revisi</b>. Salah pilih alat? Klik <b>Batal</b>, lalu nilai alat yang benar.
+                    Revisi dan batal hanya bisa selama alat belum diterima CSSD.
+                </p>
+            </div>
+            <div class="px-6 pb-6">
+                <div class="overflow-x-auto">
+                    <table id="tbrevisi" class="display cell-border compact w-full text-sm">
+                        <thead>
+                            <tr class="bg-slate-100">
+                                <th class="border border-slate-200 p-2">Tanggal Pakai</th>
+                                <th class="border border-slate-200 p-2">Kode Unik</th>
+                                <th class="border border-slate-200 p-2">Nama Alat</th>
+                                <th class="border border-slate-200 p-2">Pasien</th>
+                                <th class="border border-slate-200 p-2">Hasil</th>
+                                <th class="border border-slate-200 p-2">Perawat</th>
+                                <th class="border border-slate-200 p-2">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -155,13 +195,26 @@
         var itemdipilih = {};
         var requestpasien = null;
         var statuspasien = 'Pilih ruangan dan tanggal terlebih dahulu';
+        var tabelrevisi;
+        var revisi = null;
+        var pasienrevisi = null;
+        var formsebelumrevisi = null;
 
         $(document).ready(function() {
             $("#tanggalpenggunaan").val(new Date().toISOString().slice(0, 10));
             $("#jampenggunaan").val(new Date().toTimeString().slice(0, 5));
             datatableperawatkeluar();
+            datatablerevisi();
             getpegawai();
             getruangan();
+
+            $("#tbrevisi").on('click', '.tombolrevisi', function() {
+                mulairevisi(tabelrevisi.row($(this).closest('tr')).data());
+            });
+
+            $("#tbrevisi").on('click', '.tombolbatalpenilaian', function() {
+                batalpenilaian(tabelrevisi.row($(this).closest('tr')).data());
+            });
 
             $("#tbperawatkeluar").on('change', '.pilihitem', function() {
                 var id = $(this).val();
@@ -246,9 +299,98 @@
             $("#approvalcatatan").val('');
             $(".kriteriarusak").prop('checked', false);
             $(".error-message").remove();
+            // Keluar dari revisi: kembalikan isian yang ikut menyaring daftar alat dan pasien.
+            if (formsebelumrevisi) {
+                $("#namasectionpengguna").val(formsebelumrevisi.ruanganalat);
+                $("#tanggalpenggunaan").val(formsebelumrevisi.tanggal);
+                $("#jampenggunaan").val(formsebelumrevisi.jam);
+                $("#ruanganpasien").val(formsebelumrevisi.ruanganpasien);
+                formsebelumrevisi = null;
+                pasienrevisi = null;
+                pilihsectionrawatinap(true);
+            }
+            revisi = null;
+            pasienrevisi = null;
+            $("#boxrevisi").addClass('hidden');
+            $("#bagianbelumdinilai").removeClass('hidden');
+            $("#tombolsimpan").text('Simpan');
             hitungdipilih();
             updateapprovaloverreuse();
             tabelperawatkeluar.ajax.reload(null, false);
+            if (tabelrevisi) tabelrevisi.ajax.reload(null, false);
+        }
+
+        // Revisi: isi ulang form dengan penilaian sebelumnya; hanya alat ini yang disimpan.
+        function mulairevisi(data) {
+            if (!revisi) {
+                formsebelumrevisi = {
+                    ruanganalat: $("#namasectionpengguna").val(),
+                    tanggal: $("#tanggalpenggunaan").val(),
+                    jam: $("#jampenggunaan").val(),
+                    ruanganpasien: $("#ruanganpasien").val(),
+                };
+            }
+
+            revisi = data;
+            itemdipilih = {};
+            itemdipilih[data.cssd_keluar_log_id] = data;
+            hitungdipilih();
+
+            $("#infokoderevisi").text(data.kode_unik + ' - ' + data.nama_bmhp);
+            $("#boxrevisi").removeClass('hidden');
+            $("#bagianbelumdinilai").addClass('hidden');
+            $("#tombolsimpan").text('Simpan Revisi');
+            $(".error-message").remove();
+
+            $("#tanggalpenggunaan").val(data.tanggal_penggunaan || '');
+            $("#jampenggunaan").val(String(data.jam_penggunaan || '').slice(0, 5));
+            if (!$("#namasectionpengguna").prop('readonly')) $("#namasectionpengguna").val(data.nama_section_pengguna || '');
+            $("#namaperawat").val(data.nama_perawat || '');
+            $("#hasiluji").val(data.hasil_uji_perawat);
+            $("#catatan").val(data.catatan_uji_perawat || '');
+            $(".kriteriarusak").each(function() {
+                $(this).prop('checked', (data.kriteria_rusak || []).indexOf(String($(this).val())) !== -1);
+            });
+
+            $("#approvaloverreuse").prop('checked', parseInt(data.approval_over_reuse || 0) === 1);
+            updateapprovaloverreuse();
+            $("#approvaldpjp").val(data.approval_dpjp || '');
+            $("#approvalalasan").val(data.approval_alasan || '');
+            $("#approvalcatatan").val(data.approval_catatan || '');
+
+            // Pasien dipilih ulang dari SIMRS; pasien yang sama otomatis terpilih setelah daftar dimuat.
+            pasienrevisi = data.no_rm;
+            $("#ruanganpasien").val(String(data.ruangan_pasien_id || ''));
+            pilihsectionrawatinap(true);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function batalrevisi() {
+            kosong();
+        }
+
+        // Batal penilaian (mis. salah pilih alat): alat kembali ke daftar "Barang Sudah Dipakai / Belum Masuk CSSD".
+        function batalpenilaian(data) {
+            if (!confirm('Batalkan penilaian ' + data.kode_unik + ' - ' + data.nama_bmhp + '?\n\n' +
+                'Data pasien dan hasil penilaian alat ini akan dihapus, lalu alat kembali ke daftar belum dinilai.')) {
+                return;
+            }
+
+            $.ajax({
+                url: '/input-perawat/batal',
+                type: 'POST',
+                data: { _token: "{{ csrf_token() }}", cssd_keluar_log_id: data.cssd_keluar_log_id },
+                success: function(response) {
+                    alert(response.message);
+                    if (revisi) {
+                        kosong();
+                    } else {
+                        tabelperawatkeluar.ajax.reload(null, false);
+                        tabelrevisi.ajax.reload(null, false);
+                    }
+                },
+                error: function(xhr) { alert('Terjadi kesalahan: ' + pesanerror(xhr)); }
+            });
         }
 
         function hitungdipilih() {
@@ -329,6 +471,39 @@
             });
         }
 
+        function datatablerevisi() {
+            tabelrevisi = $("#tbrevisi").DataTable({
+                processing: true,
+                serverSide: true,
+                ajax: {
+                    url: '/operasional/kelayakan-revisi-data',
+                    data: function(d) {
+                        d.nama_section_pengguna = $("#namasectionpengguna").val().trim();
+                    }
+                },
+                pageLength: 5,
+                lengthMenu: [5, 10, 25],
+                language: bahasaDatatable(),
+                columns: [
+                    { data: null, render: function(data) { return tampil((data.tanggal_penggunaan || '-') + ' ' + String(data.jam_penggunaan || '').slice(0, 5)); } },
+                    { data: 'kode_unik', render: function(data) { return tampil(data); } },
+                    { data: 'nama_bmhp', render: function(data) { return tampil(data); } },
+                    { data: null, render: function(data) { return tampil((data.no_rm || '-') + ' - ' + (data.nama_pasien || '-')); } },
+                    { data: 'hasil_uji_perawat', render: function(data) {
+                        var warna = data === 'LAYAK' ? 'bg-teal-100 text-teal-800' : 'bg-red-100 text-red-700';
+                        return '<span class="rounded px-2 py-0.5 text-xs font-semibold ' + warna + '">' + tampil(data) + '</span>';
+                    } },
+                    { data: 'nama_perawat', render: function(data) { return tampil(data); } },
+                    { data: null, orderable: false, searchable: false, render: function() {
+                        return '<div class="flex gap-1">' +
+                            '<button type="button" class="tombolrevisi rounded bg-amber-400 px-3 py-1 text-xs font-medium text-amber-950 hover:bg-amber-500">Revisi</button>' +
+                            '<button type="button" class="tombolbatalpenilaian rounded border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50">Batal</button>' +
+                            '</div>';
+                    } },
+                ]
+            });
+        }
+
         function statusexpire(tanggal) {
             if (!tanggal) {
                 return '-';
@@ -365,7 +540,7 @@
                 type: 'POST',
                 data: data,
                 success: function(response) {
-                    alert('Input perawat berhasil disimpan. Jumlah item: ' + response.jumlah);
+                    alert(revisi ? 'Revisi penilaian berhasil disimpan.' : 'Input perawat berhasil disimpan. Jumlah item: ' + response.jumlah);
                     kosong();
                 },
                 error: function(xhr) { alert('Terjadi kesalahan: ' + pesanerror(xhr)); }
@@ -435,6 +610,15 @@
                 daftarpasienrawatinap = data.pasien || [];
                 statuspasien = 'Pasien tidak ditemukan di SIMRS';
                 rendernormrawatinap();
+
+                if (pasienrevisi) {
+                    var pasiensama = daftarpasienrawatinap.find(function(item) { return item.no_rm === pasienrevisi; });
+                    if (pasiensama) {
+                        $("#norm").val(pasiensama.pasien_token);
+                        pilihpasienrawatinap();
+                    }
+                    pasienrevisi = null;
+                }
             }).fail(function(xhr, status) {
                 if (status === 'abort') return;
                 if (String(ruanganfk) !== String(ruanganaktifid) || tanggal !== tanggalaktifpasien) return;
@@ -455,7 +639,14 @@
         }
 
         function ruanganalatberubah() {
+            // Mengganti ruangan alat membatalkan revisi, tetapi ruangan yang baru diketik tetap dipakai.
+            if (revisi) {
+                var ruanganalatbaru = $("#namasectionpengguna").val();
+                kosong();
+                $("#namasectionpengguna").val(ruanganalatbaru);
+            }
             itemdipilih = {};
+            if (tabelrevisi) tabelrevisi.ajax.reload();
             hitungdipilih();
             updateapprovaloverreuse();
             if (tabelperawatkeluar) tabelperawatkeluar.ajax.reload();

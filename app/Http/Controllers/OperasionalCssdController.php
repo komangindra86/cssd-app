@@ -1165,6 +1165,106 @@ class OperasionalCssdController extends Controller
         return response()->json($logs->get());
     }
 
+    /**
+     * Penilaian perawat yang masih bisa direvisi: distribusi terbaru, belum diterima CSSD, status alat belum diubah pihak lain.
+     */
+    public function perawatRevisiData(Request $request)
+    {
+        $logs = DB::table('cssd_keluar_logs as keluar')
+            ->join('cssd_items as item', 'keluar.cssd_item_id', '=', 'item.id')
+            ->join('master_bmhp as bmhp', 'item.bmhp_id', '=', 'bmhp.id')
+            ->leftJoin('cssd_ujis as uji', 'uji.cssd_keluar_log_id', '=', 'keluar.id')
+            ->where(function ($query) {
+                $query->where(fn ($q) => $q->where('keluar.hasil_uji_perawat', 'LAYAK')->where('item.status', 'KELUAR'))
+                    ->orWhere(fn ($q) => $q->where('keluar.hasil_uji_perawat', 'TIDAK LAYAK')->where('item.status', 'DISPOSE'));
+            })
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('cssd_keluar_logs as terbaru')
+                    ->whereColumn('terbaru.cssd_item_id', 'keluar.cssd_item_id')
+                    ->whereColumn('terbaru.id', '>', 'keluar.id');
+            })
+            ->whereNotExists(function ($query) {
+                $query->selectRaw('1')
+                    ->from('cssd_masuk_logs as masuk')
+                    ->whereColumn('masuk.cssd_keluar_log_id', 'keluar.id');
+            })
+            ->select(
+                'keluar.id as cssd_keluar_log_id',
+                'keluar.cssd_item_id',
+                'keluar.tanggal_penggunaan',
+                'keluar.jam_penggunaan',
+                'keluar.nama_section_pengguna',
+                'keluar.ruangan_pasien_id',
+                'keluar.nama_ruangan_pasien',
+                'keluar.no_rm',
+                'keluar.nama_pasien',
+                'keluar.nama_dpjp',
+                'keluar.nama_perawat',
+                'keluar.hasil_uji_perawat',
+                'keluar.catatan_uji_perawat',
+                'keluar.reuse_ke_keluar',
+                'keluar.approval_over_reuse',
+                'keluar.approval_dpjp',
+                'keluar.approval_alasan',
+                'keluar.approval_catatan',
+                'keluar.penilai_nama',
+                'item.kode_unik',
+                'item.reuse_ke',
+                'bmhp.nama as nama_bmhp',
+                'bmhp.max_reuse',
+                'uji.kriteria_rusak'
+            );
+
+        $request->user()->batasiQueryRuangan($logs, 'keluar.nama_section_pengguna');
+        $request->user()->batasiQueryRuangan($logs, 'item.last_unit');
+
+        if ($request->filled('nama_section_pengguna')) {
+            $logs->where('keluar.nama_section_pengguna', 'like', '%' . $request->nama_section_pengguna . '%');
+        }
+
+        $total = $this->countForDataTable(clone $logs);
+        $search = $this->searchValue($request);
+
+        if ($search !== '') {
+            $logs->where(function ($query) use ($search) {
+                $query->where('item.kode_unik', 'like', '%' . $search . '%')
+                    ->orWhere('bmhp.nama', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.no_rm', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.nama_pasien', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.nama_perawat', 'like', '%' . $search . '%');
+            });
+        }
+
+        $logs->orderByDesc('keluar.tanggal_uji_perawat')
+            ->orderByDesc('keluar.jam_uji_perawat')
+            ->orderByDesc('keluar.id');
+
+        $mapper = function ($row) {
+            $row->kriteria_rusak = array_map('strval', json_decode($row->kriteria_rusak ?? '[]', true) ?: []);
+
+            return $row;
+        };
+
+        if ($request->filled('draw')) {
+            return $this->dataTableResponse($logs, $request, $mapper, $total);
+        }
+
+        return response()->json($logs->get()->map($mapper));
+    }
+
+    /**
+     * Status alat sesuai penilaian perawat: belum dinilai/LAYAK masih KELUAR, TIDAK LAYAK sudah DISPOSE.
+     */
+    private function statusSesuaiPenilaian(?string $status, ?string $hasil): bool
+    {
+        return match ($hasil ?: null) {
+            null, 'LAYAK' => $status === 'KELUAR',
+            'TIDAK LAYAK' => $status === 'DISPOSE',
+            default => false,
+        };
+    }
+
     public function perawatSelesaiData(Request $request)
     {
         $logs = DB::table('cssd_keluar_logs as keluar')
@@ -1393,7 +1493,10 @@ class OperasionalCssdController extends Controller
                         'Anda hanya dapat memproses BMHP dari ruangan akun Anda.');
                 }
 
-                if (!$keluar || $keluar->status_item !== 'KELUAR') {
+                // Revisi: penilaian yang sudah tersimpan boleh diubah selama alat belum diterima CSSD.
+                $revisi = $keluar && !empty($keluar->hasil_uji_perawat);
+
+                if (!$keluar || !$this->statusSesuaiPenilaian($keluar->status_item, $keluar->hasil_uji_perawat)) {
                     throw ValidationException::withMessages([
                         'cssd_keluar_log_ids' =>
                             'Item tidak sedang status KELUAR.',
@@ -1406,15 +1509,22 @@ class OperasionalCssdController extends Controller
                     ]);
                 }
 
-                // Hanya distribusi terbaru yang belum dinilai, agar riwayat siklus sebelumnya tidak tertimpa.
+                // Hanya distribusi terbaru, agar riwayat siklus sebelumnya tidak tertimpa.
                 $logTerbaru = DB::table('cssd_keluar_logs')
                     ->where('cssd_item_id', $keluar->cssd_item_id)
                     ->max('id');
 
-                if ((int) $logTerbaru !== (int) $keluar->id || !empty($keluar->hasil_uji_perawat)) {
+                if ((int) $logTerbaru !== (int) $keluar->id) {
                     throw ValidationException::withMessages([
                         'cssd_keluar_log_ids' => 'Item ' . $keluar->kode_unik .
-                            ' sudah dinilai atau bukan distribusi terbaru. Muat ulang daftar lalu pilih kembali.',
+                            ' bukan distribusi terbaru. Muat ulang daftar lalu pilih kembali.',
+                    ]);
+                }
+
+                if (DB::table('cssd_masuk_logs')->where('cssd_keluar_log_id', $keluar->id)->exists()) {
+                    throw ValidationException::withMessages([
+                        'cssd_keluar_log_ids' => 'Item ' . $keluar->kode_unik .
+                            ' sudah diterima CSSD, penilaian tidak bisa direvisi lagi.',
                     ]);
                 }
 
@@ -1485,6 +1595,10 @@ class OperasionalCssdController extends Controller
                     ]
                 );
 
+                $awalanLog = $revisi
+                    ? 'Revisi penilaian perawat (sebelumnya ' . $keluar->hasil_uji_perawat . '). '
+                    : '';
+
                 if (!$layak) {
                     DB::table('cssd_items')
                         ->where('id', $keluar->cssd_item_id)
@@ -1496,14 +1610,24 @@ class OperasionalCssdController extends Controller
                     $this->simpanLog(
                         $keluar->cssd_item_id,
                         'DISPOSE',
-                        'Perawat menyatakan alat tidak layak digunakan ulang setelah dipakai pasien. Ruangan alat: ' .
+                        $awalanLog . 'Perawat menyatakan alat tidak layak digunakan ulang setelah dipakai pasien. Ruangan alat: ' .
                             $keluar->nama_section_pengguna . '; ruangan pasien: ' . $pasien['ruangan'] .
                             '; dicatat oleh: ' . $request->user()->name,
                         $request->tanggal_penggunaan,
                         $request->nama_perawat
                     );
                 } else {
-                    $keterangan =
+                    // Revisi dari TIDAK LAYAK: alat batal dibuang dan kembali menunggu diterima CSSD.
+                    if ($keluar->status_item !== 'KELUAR') {
+                        DB::table('cssd_items')
+                            ->where('id', $keluar->cssd_item_id)
+                            ->update([
+                                'status' => 'KELUAR',
+                                'updated_at' => now(),
+                            ]);
+                    }
+
+                    $keterangan = $awalanLog .
                         'Perawat menyatakan alat masih layak digunakan ulang setelah dipakai pasien. Ruangan alat: ' .
                         $keluar->nama_section_pengguna . '; ruangan pasien: ' . $pasien['ruangan'] .
                         '; dicatat oleh: ' . $request->user()->name;
@@ -1532,6 +1656,88 @@ class OperasionalCssdController extends Controller
         return response()->json([
             'success' => true,
             'jumlah' => $jumlah,
+        ]);
+    }
+
+    /**
+     * Batal penilaian (mis. salah pilih alat): alat kembali ke daftar belum dinilai selama belum diterima CSSD.
+     */
+    public function perawatBatal(Request $request)
+    {
+        $request->validate([
+            'cssd_keluar_log_id' => 'required|integer|exists:cssd_keluar_logs,id',
+        ]);
+
+        $kode = DB::transaction(function () use ($request) {
+            $keluar = DB::table('cssd_keluar_logs as keluar')
+                ->join('cssd_items as item', 'keluar.cssd_item_id', '=', 'item.id')
+                ->where('keluar.id', $request->cssd_keluar_log_id)
+                ->select('keluar.*', 'item.status as status_item', 'item.last_unit as ruangan_item', 'item.kode_unik')
+                ->lockForUpdate()
+                ->first();
+
+            abort_unless($request->user()->bolehAksesRuangan($keluar->nama_section_pengguna)
+                && $request->user()->bolehAksesRuangan($keluar->ruangan_item), 403,
+                'Anda hanya dapat memproses BMHP dari ruangan akun Anda.');
+
+            $logTerbaru = DB::table('cssd_keluar_logs')->where('cssd_item_id', $keluar->cssd_item_id)->max('id');
+            $diterima = DB::table('cssd_masuk_logs')->where('cssd_keluar_log_id', $keluar->id)->exists();
+
+            if (empty($keluar->hasil_uji_perawat) || (int) $logTerbaru !== (int) $keluar->id
+                || $diterima || !$this->statusSesuaiPenilaian($keluar->status_item, $keluar->hasil_uji_perawat)) {
+                throw ValidationException::withMessages([
+                    'cssd_keluar_log_id' => 'Penilaian ' . $keluar->kode_unik . ' tidak bisa dibatalkan'
+                        . ($diterima ? ' karena alat sudah diterima CSSD.' : '. Muat ulang daftar lalu coba lagi.'),
+                ]);
+            }
+
+            // Kembalikan ke kondisi saat alat baru didistribusikan (seperti belum pernah dinilai).
+            DB::table('cssd_keluar_logs')->where('id', $keluar->id)->update([
+                'tanggal_penggunaan' => $keluar->tanggal_keluar ?: $keluar->tanggal_penggunaan,
+                'jam_penggunaan' => null,
+                'ruangan_pasien_id' => null,
+                'nama_ruangan_pasien' => null,
+                'penilai_user_id' => null,
+                'penilai_nama' => null,
+                'no_rm' => '-',
+                'nama_pasien' => '-',
+                'nama_dpjp' => '-',
+                'nama_perawat' => '-',
+                'tanggal_uji_perawat' => null,
+                'jam_uji_perawat' => null,
+                'hasil_uji_perawat' => null,
+                'catatan_uji_perawat' => null,
+                'approval_over_reuse' => false,
+                'approval_dpjp' => null,
+                'approval_alasan' => null,
+                'approval_catatan' => null,
+                'updated_at' => now(),
+            ]);
+
+            DB::table('cssd_ujis')->where('cssd_keluar_log_id', $keluar->id)->delete();
+
+            if ($keluar->status_item !== 'KELUAR') {
+                DB::table('cssd_items')->where('id', $keluar->cssd_item_id)->update([
+                    'status' => 'KELUAR',
+                    'updated_at' => now(),
+                ]);
+            }
+
+            $this->simpanLog(
+                $keluar->cssd_item_id,
+                'KELUAR',
+                'Penilaian perawat dibatalkan (sebelumnya ' . $keluar->hasil_uji_perawat . ', No. RM ' . $keluar->no_rm .
+                    '). Alat kembali menunggu penilaian. Dibatalkan oleh: ' . $request->user()->name,
+                now()->toDateString(),
+                $request->user()->name
+            );
+
+            return $keluar->kode_unik;
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Penilaian ' . $kode . ' dibatalkan. Alat kembali ke daftar belum dinilai.',
         ]);
     }
 
