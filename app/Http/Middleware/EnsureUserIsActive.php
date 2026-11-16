@@ -21,7 +21,10 @@ class EnsureUserIsActive
             $request->session()->regenerateToken();
 
             if ($request->expectsJson()) {
-                abort(401, 'User tidak aktif. Hubungi admin.');
+                // Halaman akan dialihkan ke login oleh JavaScript; pesannya ditampilkan di sana.
+                $request->session()->flash('pesan_login', 'User tidak aktif. Hubungi admin.');
+
+                return response()->json(['message' => 'User tidak aktif. Hubungi admin.'], 401);
             }
 
             return redirect()->route('login')

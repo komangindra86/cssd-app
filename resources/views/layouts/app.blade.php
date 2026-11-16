@@ -45,6 +45,58 @@
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+    <script id="sesi-habis">
+        // Sesi habis: arahkan ke login (lalu kembali ke halaman ini) tanpa menampilkan error dari request yang gagal.
+        (function () {
+            var batasSesi = {{ (int) config('session.lifetime') }} * 60 * 1000 + 5000;
+            // Dengan "Ingat saya" sesi diperpanjang otomatis, jadi halaman tidak perlu dialihkan karena diam.
+            var pakaiTimer = @json(! request()->hasCookie(auth()->guard()->getRecallerName()));
+            var urlLogin = @json(route('login'));
+            var timer = null;
+            var dialihkan = false;
+
+            function keLogin() {
+                if (dialihkan) return;
+                dialihkan = true;
+                window.alert = function () {};
+                if ($.fn.dataTable) $.fn.dataTable.ext.errMode = 'none';
+                window.location.href = urlLogin + '?sesi=berakhir&kembali=' +
+                    encodeURIComponent(window.location.pathname + window.location.search);
+            }
+
+            function aturTimer() {
+                if (!pakaiTimer || dialihkan) return;
+                clearTimeout(timer);
+                timer = setTimeout(keLogin, batasSesi);
+            }
+
+            function sesiHabis(xhr) {
+                return xhr.status === 401 || xhr.status === 419;
+            }
+
+            // Dipasang sebelum handler error halaman/DataTables, supaya alert error tidak sempat muncul.
+            $.ajaxPrefilter(function (options) {
+                var errorAsli = [].concat(options.error || []);
+
+                options.error = function (xhr) {
+                    if (sesiHabis(xhr)) {
+                        keLogin();
+                        return;
+                    }
+
+                    var konteks = this;
+                    var argumen = arguments;
+                    errorAsli.forEach(function (handler) { handler.apply(konteks, argumen); });
+                };
+            });
+
+            $(document).ajaxComplete(function (event, xhr) {
+                if (!sesiHabis(xhr)) aturTimer();
+            });
+
+            aturTimer();
+        })();
+    </script>
     @stack('scripts')
 </body>
 

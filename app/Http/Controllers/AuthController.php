@@ -7,9 +7,30 @@ use Illuminate\Support\Facades\Auth;
 
 class AuthController extends Controller
 {
-    public function login()
+    public function login(Request $request)
     {
-        return view('auth.login');
+        // Sesi habis di tengah halaman: setelah login kembali ke halaman yang tadi dibuka.
+        if ($kembali = self::urlKembali($request)) {
+            $request->session()->put('url.intended', $kembali);
+        }
+
+        return view('auth.login', [
+            'sesiBerakhir' => $request->query('sesi') === 'berakhir',
+        ]);
+    }
+
+    /**
+     * Alamat kembali dari parameter ?kembali=, hanya path di aplikasi ini (bukan situs lain).
+     */
+    public static function urlKembali(Request $request): ?string
+    {
+        $path = $request->query('kembali');
+
+        if (!is_string($path) || !preg_match('#^/(?![/\\\\])#', $path) || preg_match('#^/(login|logout)\b#', $path)) {
+            return null;
+        }
+
+        return url($path);
     }
 
     public function prosesLogin(Request $request)
