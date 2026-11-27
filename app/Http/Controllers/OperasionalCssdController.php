@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use App\Services\PegawaiSimrs;
 use App\Services\RuanganSimrs;
 use App\Services\SimrsApi;
@@ -1093,6 +1094,7 @@ class OperasionalCssdController extends Controller
                 'keluar.perawat_penerima',
                 'keluar.hasil_uji_perawat',
                 'keluar.reuse_ke_keluar',
+                'keluar.ruangan_peminjam',
                 'item.kode_unik',
                 'item.reuse_ke',
                 'item.last_unit',
@@ -1102,20 +1104,19 @@ class OperasionalCssdController extends Controller
                 'bmhp.max_reuse'
             );
 
-        $request->user()->batasiQueryRuangan($logs, 'keluar.nama_section_pengguna');
-        $request->user()->batasiQueryRuangan($logs, 'item.last_unit');
+        // Pemilik tetap melihat alatnya yang sedang dipinjam unit lain, sebagai informasi (tidak bisa dinilai).
+        $this->batasiRuanganAlat($logs, $request->user(), true);
 
         if ($request->boolean('belum_uji')) {
             $logs->whereNull('keluar.hasil_uji_perawat');
         }
 
-        if ($request->filled('nama_section_pengguna')) {
-            $logs->where(
-                'keluar.nama_section_pengguna',
-                'like',
-                '%' . $request->nama_section_pengguna . '%'
-            );
+        // Dipakai form untuk mengecek ulang alat yang sedang dicentang (mis. setelah simpan ditolak).
+        if ($request->filled('cssd_keluar_log_ids')) {
+            $logs->whereIn('keluar.id', array_map('intval', (array) $request->input('cssd_keluar_log_ids')));
         }
+
+        $this->saringRuanganAlat($logs, $request->nama_section_pengguna);
 
         $total = $this->countForDataTable(clone $logs);
         $search = $this->searchValue($request);
@@ -1209,6 +1210,7 @@ class OperasionalCssdController extends Controller
                 'keluar.approval_alasan',
                 'keluar.approval_catatan',
                 'keluar.penilai_nama',
+                'keluar.ruangan_peminjam',
                 'item.kode_unik',
                 'item.reuse_ke',
                 'bmhp.nama as nama_bmhp',
@@ -1216,12 +1218,8 @@ class OperasionalCssdController extends Controller
                 'uji.kriteria_rusak'
             );
 
-        $request->user()->batasiQueryRuangan($logs, 'keluar.nama_section_pengguna');
-        $request->user()->batasiQueryRuangan($logs, 'item.last_unit');
-
-        if ($request->filled('nama_section_pengguna')) {
-            $logs->where('keluar.nama_section_pengguna', 'like', '%' . $request->nama_section_pengguna . '%');
-        }
+        $this->batasiRuanganAlat($logs, $request->user());
+        $this->saringRuanganAlat($logs, $request->nama_section_pengguna);
 
         $total = $this->countForDataTable(clone $logs);
         $search = $this->searchValue($request);
@@ -1251,6 +1249,65 @@ class OperasionalCssdController extends Controller
         }
 
         return response()->json($logs->get()->map($mapper));
+    }
+
+    /**
+     * Batasi ke alat yang boleh dinilai perawat: milik ruangannya yang tidak sedang dipinjamkan, atau yang ia pinjam.
+     * Dengan $termasukDipinjamkan, alat ruangannya yang sedang dipinjam unit lain ikut tampil.
+     */
+    private function batasiRuanganAlat($query, User $user, bool $termasukDipinjamkan = false): void
+    {
+        if (!$user->dibatasiRuangan()) {
+            return;
+        }
+
+        $query->where(function ($query) use ($user, $termasukDipinjamkan) {
+            $query->where(function ($milik) use ($user, $termasukDipinjamkan) {
+                $user->batasiQueryRuangan($milik, 'keluar.nama_section_pengguna');
+                $user->batasiQueryRuangan($milik, 'item.last_unit');
+
+                if (!$termasukDipinjamkan) {
+                    $milik->whereNull('keluar.ruangan_peminjam');
+                }
+            })->orWhere(fn ($pinjaman) => $user->batasiQueryRuangan($pinjaman, 'keluar.ruangan_peminjam'));
+        });
+    }
+
+    /**
+     * Filter "Ruangan Alat" di form: alat milik ruangan itu dan alat yang dipinjam ruangan itu.
+     */
+    private function saringRuanganAlat($query, ?string $ruangan): void
+    {
+        if (blank($ruangan)) {
+            return;
+        }
+
+        $query->where(function ($query) use ($ruangan) {
+            $query->where('keluar.nama_section_pengguna', 'like', '%' . $ruangan . '%')
+                ->orWhere('keluar.ruangan_peminjam', 'like', '%' . $ruangan . '%');
+        });
+    }
+
+    /**
+     * Ruangan yang menilai alat: unit peminjam bila alat dipinjam, selain itu ruangan alat (pemilik).
+     */
+    private function ruanganPenilai($keluar): string
+    {
+        return trim((string) ($keluar->ruangan_peminjam ?? '')) ?: (string) $keluar->nama_section_pengguna;
+    }
+
+    private function infoPinjam($keluar): string
+    {
+        return filled($keluar->ruangan_peminjam ?? null) ? '; dipinjam oleh: ' . $keluar->ruangan_peminjam : '';
+    }
+
+    private function bolehNilai(User $user, $keluar): bool
+    {
+        if (filled($keluar->ruangan_peminjam ?? null)) {
+            return $user->bolehAksesRuangan($keluar->ruangan_peminjam);
+        }
+
+        return $user->bolehAksesRuangan($keluar->nama_section_pengguna) && $user->bolehAksesRuangan($keluar->ruangan_item);
     }
 
     /**
@@ -1299,6 +1356,7 @@ class OperasionalCssdController extends Controller
                 'keluar.jam_uji_perawat',
                 'keluar.nama_section_pengguna',
                 'keluar.nama_ruangan_pasien',
+                'keluar.ruangan_peminjam',
                 'keluar.no_rm',
                 'keluar.nama_pasien',
                 'keluar.nama_dpjp',
@@ -1372,7 +1430,8 @@ class OperasionalCssdController extends Controller
                         'like',
                         '%' . $search . '%'
                     )
-                    ->orWhere('keluar.nama_ruangan_pasien', 'like', '%' . $search . '%');
+                    ->orWhere('keluar.nama_ruangan_pasien', 'like', '%' . $search . '%')
+                    ->orWhere('keluar.ruangan_peminjam', 'like', '%' . $search . '%');
             });
         }
 
@@ -1488,8 +1547,16 @@ class OperasionalCssdController extends Controller
                     ->first();
 
                 if ($keluar) {
-                    abort_unless($request->user()->bolehAksesRuangan($keluar->nama_section_pengguna)
-                        && $request->user()->bolehAksesRuangan($keluar->ruangan_item), 403,
+                    // Alat yang sedang dipinjam unit lain dinilai oleh unit peminjam, bukan pemiliknya.
+                    if (filled($keluar->ruangan_peminjam) && !$request->user()->bolehAksesRuangan($keluar->ruangan_peminjam)
+                        && $request->user()->bolehAksesRuangan($keluar->nama_section_pengguna)) {
+                        throw ValidationException::withMessages([
+                            'cssd_keluar_log_ids' => 'Item ' . $keluar->kode_unik . ' sedang dipinjam ' . $keluar->ruangan_peminjam .
+                                '. Penilaian dilakukan oleh unit peminjam.',
+                        ]);
+                    }
+
+                    abort_unless($this->bolehNilai($request->user(), $keluar), 403,
                         'Anda hanya dapat memproses BMHP dari ruangan akun Anda.');
                 }
 
@@ -1503,7 +1570,7 @@ class OperasionalCssdController extends Controller
                     ]);
                 }
 
-                if (mb_strtolower(trim($keluar->nama_section_pengguna)) !== mb_strtolower(trim($request->nama_section_pengguna))) {
+                if (mb_strtolower(trim($this->ruanganPenilai($keluar))) !== mb_strtolower(trim($request->nama_section_pengguna))) {
                     throw ValidationException::withMessages([
                         'cssd_keluar_log_ids' => 'Pilih alat sesuai ruangan alat. Ruangan pasien tidak mengubah ruangan alat.',
                     ]);
@@ -1611,7 +1678,7 @@ class OperasionalCssdController extends Controller
                         $keluar->cssd_item_id,
                         'DISPOSE',
                         $awalanLog . 'Perawat menyatakan alat tidak layak digunakan ulang setelah dipakai pasien. Ruangan alat: ' .
-                            $keluar->nama_section_pengguna . '; ruangan pasien: ' . $pasien['ruangan'] .
+                            $keluar->nama_section_pengguna . $this->infoPinjam($keluar) . '; ruangan pasien: ' . $pasien['ruangan'] .
                             '; dicatat oleh: ' . $request->user()->name,
                         $request->tanggal_penggunaan,
                         $request->nama_perawat
@@ -1629,7 +1696,7 @@ class OperasionalCssdController extends Controller
 
                     $keterangan = $awalanLog .
                         'Perawat menyatakan alat masih layak digunakan ulang setelah dipakai pasien. Ruangan alat: ' .
-                        $keluar->nama_section_pengguna . '; ruangan pasien: ' . $pasien['ruangan'] .
+                        $keluar->nama_section_pengguna . $this->infoPinjam($keluar) . '; ruangan pasien: ' . $pasien['ruangan'] .
                         '; dicatat oleh: ' . $request->user()->name;
 
                     if ($approvalBerlaku) {
@@ -1676,8 +1743,7 @@ class OperasionalCssdController extends Controller
                 ->lockForUpdate()
                 ->first();
 
-            abort_unless($request->user()->bolehAksesRuangan($keluar->nama_section_pengguna)
-                && $request->user()->bolehAksesRuangan($keluar->ruangan_item), 403,
+            abort_unless($this->bolehNilai($request->user(), $keluar), 403,
                 'Anda hanya dapat memproses BMHP dari ruangan akun Anda.');
 
             $logTerbaru = DB::table('cssd_keluar_logs')->where('cssd_item_id', $keluar->cssd_item_id)->max('id');
@@ -1738,6 +1804,152 @@ class OperasionalCssdController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Penilaian ' . $kode . ' dibatalkan. Alat kembali ke daftar belum dinilai.',
+        ]);
+    }
+
+    /**
+     * Pinjam alat milik unit lain yang sedang berada di ruangan (KELUAR, belum dinilai).
+     * Ruangan alat tetap milik unit asal; unit peminjam yang menilai dan membawa alat ke CSSD.
+     */
+    public function perawatPinjam(Request $request, RuanganSimrs $ruanganSimrs)
+    {
+        $user = $request->user();
+        abort_if($user->dibatasiRuangan() && !$user->punyaRuangan(), 403, 'Ruangan akun belum diatur. Hubungi super admin.');
+
+        $request->validate([
+            'kode_unik' => 'required|string|max:100',
+            'ruangan_peminjam' => 'nullable|string|max:255',
+        ], [
+            'kode_unik.required' => 'Scan atau ketik kode unik alat yang dipinjam.',
+        ]);
+
+        $peminjam = $user->dibatasiRuangan()
+            ? $user->nama_ruangan
+            : $ruanganSimrs->namaResmi($request->ruangan_peminjam, 'ruangan_peminjam');
+
+        if (blank($peminjam)) {
+            throw ValidationException::withMessages([
+                'ruangan_peminjam' => 'Isi Ruangan Alat dengan ruangan unit peminjam terlebih dahulu.',
+            ]);
+        }
+
+        $alat = DB::transaction(function () use ($request, $user, $peminjam) {
+            $kode = trim($request->kode_unik);
+            $item = DB::table('cssd_items')
+                ->join('master_bmhp', 'cssd_items.bmhp_id', '=', 'master_bmhp.id')
+                ->where('cssd_items.kode_unik', $kode)
+                ->select('cssd_items.*', 'master_bmhp.nama as nama_bmhp')
+                ->lockForUpdate()
+                ->first();
+
+            if (!$item) {
+                throw ValidationException::withMessages(['kode_unik' => 'Kode alat ' . $kode . ' tidak ditemukan.']);
+            }
+
+            $keluar = DB::table('cssd_keluar_logs')
+                ->where('cssd_item_id', $item->id)
+                ->orderByDesc('id')
+                ->lockForUpdate()
+                ->first();
+
+            $tolak = fn ($pesan) => throw ValidationException::withMessages(['kode_unik' => $pesan]);
+
+            if ($item->status !== 'KELUAR' || !$keluar) {
+                $tolak('Alat ' . $item->kode_unik . ' tidak sedang berada di ruangan (status ' . $item->status . '), jadi tidak bisa dipinjam.');
+            }
+
+            if (mb_strtolower(trim($keluar->nama_section_pengguna)) === mb_strtolower(trim($peminjam))) {
+                $tolak('Alat ' . $item->kode_unik . ' milik ruangan ' . $keluar->nama_section_pengguna . ' sendiri, tidak perlu dipinjam.');
+            }
+
+            if (filled($keluar->ruangan_peminjam)) {
+                $tolak('Alat ' . $item->kode_unik . ' sedang dipinjam ' . $keluar->ruangan_peminjam . '.');
+            }
+
+            if (filled($keluar->hasil_uji_perawat)
+                || DB::table('cssd_masuk_logs')->where('cssd_keluar_log_id', $keluar->id)->exists()) {
+                $tolak('Alat ' . $item->kode_unik . ' sudah dinilai oleh ruangan ' . $keluar->nama_section_pengguna . ', jadi tidak bisa dipinjam.');
+            }
+
+            DB::table('cssd_keluar_logs')->where('id', $keluar->id)->update([
+                'ruangan_peminjam' => $peminjam,
+                'peminjam_user_id' => $user->id,
+                'peminjam_nama' => $user->name,
+                'dipinjam_pada' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $this->simpanLog(
+                $item->id,
+                'KELUAR',
+                'Dipinjam oleh ' . $peminjam . ' dari ' . $keluar->nama_section_pengguna . '. Dicatat oleh: ' . $user->name,
+                now()->toDateString(),
+                $user->name
+            );
+
+            return ['kode' => $item->kode_unik, 'nama' => $item->nama_bmhp, 'pemilik' => $keluar->nama_section_pengguna];
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Alat ' . $alat['kode'] . ' - ' . $alat['nama'] . ' dipinjam dari ' . $alat['pemilik'] .
+                '. Nilai alat ini setelah dipakai, lalu bawa ke CSSD.',
+        ]);
+    }
+
+    /**
+     * Batal pinjam (alat belum dipakai): alat kembali ke ruangan pemilik untuk dinilai di sana.
+     */
+    public function perawatKembalikanPinjaman(Request $request)
+    {
+        $request->validate([
+            'cssd_keluar_log_id' => 'required|integer|exists:cssd_keluar_logs,id',
+        ]);
+
+        $alat = DB::transaction(function () use ($request) {
+            $keluar = DB::table('cssd_keluar_logs as keluar')
+                ->join('cssd_items as item', 'keluar.cssd_item_id', '=', 'item.id')
+                ->where('keluar.id', $request->cssd_keluar_log_id)
+                ->select('keluar.*', 'item.kode_unik')
+                ->lockForUpdate()
+                ->first();
+
+            if (blank($keluar->ruangan_peminjam)) {
+                throw ValidationException::withMessages(['cssd_keluar_log_id' => 'Alat ' . $keluar->kode_unik . ' tidak sedang dipinjam.']);
+            }
+
+            abort_unless($request->user()->bolehAksesRuangan($keluar->ruangan_peminjam), 403,
+                'Hanya unit peminjam yang bisa mengembalikan alat ini.');
+
+            if (filled($keluar->hasil_uji_perawat)) {
+                throw ValidationException::withMessages([
+                    'cssd_keluar_log_id' => 'Alat ' . $keluar->kode_unik . ' sudah dinilai. Batalkan penilaiannya dulu jika alat tidak jadi dipakai.',
+                ]);
+            }
+
+            DB::table('cssd_keluar_logs')->where('id', $keluar->id)->update([
+                'ruangan_peminjam' => null,
+                'peminjam_user_id' => null,
+                'peminjam_nama' => null,
+                'dipinjam_pada' => null,
+                'updated_at' => now(),
+            ]);
+
+            $this->simpanLog(
+                $keluar->cssd_item_id,
+                'KELUAR',
+                'Pinjaman dikembalikan oleh ' . $keluar->ruangan_peminjam . ' ke ' . $keluar->nama_section_pengguna .
+                    ' tanpa dipakai. Dicatat oleh: ' . $request->user()->name,
+                now()->toDateString(),
+                $request->user()->name
+            );
+
+            return ['kode' => $keluar->kode_unik, 'pemilik' => $keluar->nama_section_pengguna];
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Alat ' . $alat['kode'] . ' dikembalikan ke ' . $alat['pemilik'] . '.',
         ]);
     }
 

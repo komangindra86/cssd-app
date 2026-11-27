@@ -333,6 +333,135 @@ class PerawatRuanganTest extends TestCase
             ->postJson('/input-perawat/batal', ['cssd_keluar_log_id' => $ruanganLain['log']])->assertForbidden();
     }
 
+    public function test_alat_dipinjam_unit_lain_dinilai_peminjam_dan_tetap_milik_pemilik_setelah_cssd(): void
+    {
+        $alat = $this->buatDistribusi('SANDAT');
+        $igd = $this->perawat();
+        $sandat = $this->perawatSandat();
+
+        $this->actingAs($igd)->postJson('/input-perawat/pinjam', ['kode_unik' => ' TEST-1 '])->assertOk()
+            ->assertJsonPath('message', 'Alat TEST-1 - CPAP Uji dipinjam dari SANDAT. Nilai alat ini setelah dipakai, lalu bawa ke CSSD.');
+        $this->assertDatabaseHas('cssd_keluar_logs', [
+            'id' => $alat['log'], 'nama_section_pengguna' => 'SANDAT', 'ruangan_peminjam' => 'IGD', 'peminjam_user_id' => $igd->id,
+        ]);
+        $this->assertDatabaseHas('cssd_items', ['id' => $alat['item'], 'last_unit' => 'SANDAT', 'status' => 'KELUAR']);
+        $this->getJson('/operasional/keluar-data?belum_uji=1')->assertOk()->assertJsonCount(1)
+            ->assertJsonPath('0.cssd_keluar_log_id', $alat['log'])->assertJsonPath('0.ruangan_peminjam', 'IGD');
+
+        // Pemilik masih melihat alatnya (sebagai informasi) tetapi tidak bisa menilainya.
+        $this->actingAs($sandat)->getJson('/operasional/keluar-data?belum_uji=1')->assertOk()
+            ->assertJsonPath('0.ruangan_peminjam', 'IGD');
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$alat['log']], ['nama_section_pengguna' => 'SANDAT']))->assertUnprocessable()
+            ->assertJsonPath('errors.cssd_keluar_log_ids.0', 'Item TEST-1 sedang dipinjam IGD. Penilaian dilakukan oleh unit peminjam.');
+
+        // Peminjam menilai dengan pasiennya sendiri; revisi tetap bisa dilakukan peminjam.
+        $this->actingAs($igd)->postJson('/input-perawat/simpan', $this->penilaian([$alat['log']]))->assertOk();
+        $this->assertDatabaseHas('cssd_keluar_logs', [
+            'id' => $alat['log'], 'nama_section_pengguna' => 'SANDAT', 'nama_ruangan_pasien' => 'IGD', 'hasil_uji_perawat' => 'LAYAK',
+        ]);
+        $this->assertTrue(DB::table('cssd_logs')->where('keterangan', 'like', '%Ruangan alat: SANDAT; dipinjam oleh: IGD; ruangan pasien: IGD%')->exists());
+        $this->getJson('/operasional/kelayakan-revisi-data')->assertOk()->assertJsonCount(1)->assertJsonPath('0.ruangan_peminjam', 'IGD');
+        $this->actingAs($sandat)->getJson('/operasional/kelayakan-revisi-data')->assertOk()->assertExactJson([]);
+
+        // CSSD menerima: alat READY dan tetap milik SANDAT.
+        $this->actingAs(User::factory()->create(['role' => 'user_cssd']));
+        $this->getJson('/operasional/perawat-selesai-data?draw=1&search[value]=IGD')->assertOk()
+            ->assertJsonPath('recordsFiltered', 1)->assertJsonPath('data.0.ruangan_peminjam', 'IGD');
+        $this->postJson('/barang-masuk/simpan', [
+            'cssd_item_id' => $alat['item'], 'tanggal_masuk' => '2026-09-23', 'cssd_keluar_log_id' => $alat['log'],
+            'metode_steril' => 'DTT', 'tanggal_steril' => '2026-09-23', 'masa_expire_bulan' => 6,
+            'petugas_penerima_pencucian' => 'CSSD Uji', 'petugas_pengemasan' => 'CSSD Uji', 'petugas_sterilisasi' => 'CSSD Uji',
+        ])->assertOk()->assertJsonPath('status', 'READY');
+        $this->assertDatabaseHas('cssd_items', ['id' => $alat['item'], 'last_unit' => 'SANDAT', 'status' => 'READY']);
+        $this->assertDatabaseHas('cssd_masuk_logs', ['cssd_keluar_log_id' => $alat['log'], 'unit_asal' => 'SANDAT']);
+    }
+
+    public function test_halaman_basi_pemilik_bisa_cek_ulang_alat_yang_dicentang(): void
+    {
+        $dipinjam = $this->buatDistribusi('SANDAT');
+        $tetap = $this->buatDistribusi('SANDAT');
+        $sudahDinilai = $this->buatDistribusi('SANDAT');
+        $this->buatDistribusi('SANDAT');
+        $this->actingAs($this->perawat())->postJson('/input-perawat/pinjam', ['kode_unik' => 'TEST-1'])->assertOk();
+        DB::table('cssd_keluar_logs')->where('id', $sudahDinilai['log'])->update(['hasil_uji_perawat' => 'LAYAK']);
+
+        // Halaman SANDAT yang belum di-refresh masih mencentang tiga alat; simpan ditolak seluruhnya.
+        $this->actingAs($this->perawatSandat());
+        $ids = [$dipinjam['log'], $tetap['log'], $sudahDinilai['log']];
+        $this->postJson('/input-perawat/simpan', $this->penilaian($ids, ['nama_section_pengguna' => 'SANDAT']))->assertUnprocessable();
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $tetap['log'], 'hasil_uji_perawat' => null]);
+
+        $rows = collect($this->getJson('/operasional/keluar-data?' . http_build_query(['belum_uji' => 1, 'cssd_keluar_log_ids' => $ids]))
+            ->assertOk()->json())->keyBy('cssd_keluar_log_id');
+        $this->assertEqualsCanonicalizing([$dipinjam['log'], $tetap['log']], $rows->keys()->all());
+        $this->assertSame('IGD', $rows[$dipinjam['log']]['ruangan_peminjam']);
+        $this->assertNull($rows[$tetap['log']]['ruangan_peminjam']);
+
+        $this->postJson('/input-perawat/simpan', $this->penilaian([$tetap['log']], ['nama_section_pengguna' => 'SANDAT']))->assertOk();
+    }
+
+    public function test_aturan_pinjam_alat(): void
+    {
+        $milikSendiri = $this->buatDistribusi('IGD');
+        $ready = $this->buatDistribusi('SANDAT', 'READY');
+        $sudahDinilai = $this->buatDistribusi('SANDAT');
+        $dipinjamLain = $this->buatDistribusi('SANDAT');
+        $bebas = $this->buatDistribusi('SANDAT');
+        DB::table('cssd_keluar_logs')->where('id', $sudahDinilai['log'])->update(['hasil_uji_perawat' => 'LAYAK']);
+        DB::table('cssd_keluar_logs')->where('id', $dipinjamLain['log'])->update(['ruangan_peminjam' => 'POLI KULIT']);
+        $this->actingAs($this->perawat());
+
+        foreach ([
+            'TEST-1' => 'Alat TEST-1 milik ruangan IGD sendiri, tidak perlu dipinjam.',
+            'TEST-2' => 'Alat TEST-2 tidak sedang berada di ruangan (status READY), jadi tidak bisa dipinjam.',
+            'TEST-3' => 'Alat TEST-3 sudah dinilai oleh ruangan SANDAT, jadi tidak bisa dipinjam.',
+            'TEST-4' => 'Alat TEST-4 sedang dipinjam POLI KULIT.',
+            'TIDAK-ADA' => 'Kode alat TIDAK-ADA tidak ditemukan.',
+        ] as $kode => $pesan) {
+            $this->postJson('/input-perawat/pinjam', ['kode_unik' => $kode])->assertUnprocessable()->assertJsonPath('errors.kode_unik.0', $pesan);
+        }
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $milikSendiri['log'], 'ruangan_peminjam' => null]);
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $dipinjamLain['log'], 'ruangan_peminjam' => 'POLI KULIT']);
+
+        // Super admin memakai Ruangan Alat di form sebagai unit peminjam (nama resmi SIMRS).
+        $this->actingAs(User::factory()->create(['role' => 'super_admin']));
+        $this->postJson('/input-perawat/pinjam', ['kode_unik' => 'TEST-5'])->assertUnprocessable()->assertJsonValidationErrors('ruangan_peminjam');
+        $this->postJson('/input-perawat/pinjam', ['kode_unik' => 'TEST-5', 'ruangan_peminjam' => ' igd '])->assertOk();
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $bebas['log'], 'ruangan_peminjam' => 'IGD']);
+
+        $this->actingAs(User::factory()->create(['role' => 'user_cssd']))
+            ->postJson('/input-perawat/pinjam', ['kode_unik' => 'TEST-5'])->assertForbidden();
+        $this->actingAs($this->perawat(['ruangan_id' => null, 'nama_ruangan' => null]))
+            ->postJson('/input-perawat/pinjam', ['kode_unik' => 'TEST-5'])->assertForbidden();
+    }
+
+    public function test_alat_pinjaman_yang_tidak_jadi_dipakai_bisa_dikembalikan(): void
+    {
+        $alat = $this->buatDistribusi('SANDAT');
+        $igd = $this->perawat();
+        $sandat = $this->perawatSandat();
+        $this->actingAs($igd)->postJson('/input-perawat/pinjam', ['kode_unik' => 'TEST-1'])->assertOk();
+
+        $this->actingAs($sandat)->postJson('/input-perawat/kembalikan-pinjaman', ['cssd_keluar_log_id' => $alat['log']])->assertForbidden();
+
+        // Sudah dinilai: penilaian harus dibatalkan dulu sebelum dikembalikan.
+        $this->actingAs($igd)->postJson('/input-perawat/simpan', $this->penilaian([$alat['log']]))->assertOk();
+        $this->postJson('/input-perawat/kembalikan-pinjaman', ['cssd_keluar_log_id' => $alat['log']])->assertUnprocessable()
+            ->assertJsonPath('errors.cssd_keluar_log_id.0', 'Alat TEST-1 sudah dinilai. Batalkan penilaiannya dulu jika alat tidak jadi dipakai.');
+        $this->postJson('/input-perawat/batal', ['cssd_keluar_log_id' => $alat['log']])->assertOk();
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $alat['log'], 'ruangan_peminjam' => 'IGD', 'hasil_uji_perawat' => null]);
+
+        $this->postJson('/input-perawat/kembalikan-pinjaman', ['cssd_keluar_log_id' => $alat['log']])->assertOk()
+            ->assertJsonPath('message', 'Alat TEST-1 dikembalikan ke SANDAT.');
+        $this->assertDatabaseHas('cssd_keluar_logs', ['id' => $alat['log'], 'ruangan_peminjam' => null, 'peminjam_user_id' => null]);
+        $this->assertTrue(DB::table('cssd_logs')->where('keterangan', 'like', 'Pinjaman dikembalikan oleh IGD ke SANDAT%')->exists());
+        $this->getJson('/operasional/keluar-data')->assertOk()->assertExactJson([]);
+
+        // Kembali di SANDAT dan dinilai oleh SANDAT seperti biasa.
+        $this->actingAs($sandat)->postJson('/input-perawat/simpan', $this->penilaian([$alat['log']], ['nama_section_pengguna' => 'SANDAT']))->assertOk();
+        $this->postJson('/input-perawat/kembalikan-pinjaman', ['cssd_keluar_log_id' => $alat['log']])->assertUnprocessable();
+    }
+
     public function test_daftar_revisi_hanya_berisi_penilaian_yang_masih_bisa_diubah(): void
     {
         $layak = $this->buatDistribusi('IGD');
@@ -679,6 +808,11 @@ class PerawatRuanganTest extends TestCase
             $this->getJson('/laporan-reuse/' . $laporan . '?draw=1&no_rm=RM-UJI&tanggal_awal=2026-09-23&tanggal_akhir=2026-09-23')
                 ->assertOk()->assertJsonPath('recordsFiltered', 0);
         }
+    }
+
+    private function perawatSandat(): User
+    {
+        return $this->perawat(['ruangan_id' => '303', 'nama_ruangan' => 'SANDAT', 'departemen_id' => '16']);
     }
 
     private function perawatPeri(): User

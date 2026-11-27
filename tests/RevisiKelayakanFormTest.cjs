@@ -158,6 +158,77 @@ test('Batal penilaian alat yang sedang direvisi juga keluar dari mode revisi', (
     assert.equal(f.ambil('#boxrevisi').hidden, true);
 });
 
+test('Status pinjaman dibaca dari ruangan aktif: peminjam bisa menilai, pemilik hanya melihat', () => {
+    const f = form();
+    f.ambil('#namasectionpengguna').nilai = 'IGD';
+
+    assert.equal(f.ctx.statuspinjaman({ nama_section_pengguna: 'SANDAT', ruangan_peminjam: 'igd' }), 'pinjaman');
+    assert.equal(f.ctx.statuspinjaman({ nama_section_pengguna: 'IGD', ruangan_peminjam: 'SANDAT' }), 'dipinjamkan');
+    assert.equal(f.ctx.statuspinjaman({ nama_section_pengguna: 'IGD', ruangan_peminjam: null }), '');
+});
+
+test('Pinjam mengirim kode alat dan ruangan peminjam, kode kosong tidak dikirim', () => {
+    const f = form();
+    const kirim = [];
+    f.ctx.$.ajax = options => kirim.push(options);
+    f.ambil('#namasectionpengguna').nilai = 'IGD';
+
+    f.ambil('#kodepinjam').nilai = '   ';
+    f.ctx.pinjamalat();
+    assert.equal(kirim.length, 0);
+
+    f.ambil('#kodepinjam').nilai = ' SDT-CPAP-01 ';
+    f.ctx.pinjamalat();
+    assert.equal(kirim[0].url, '/input-perawat/pinjam');
+    assert.equal(kirim[0].data.kode_unik, 'SDT-CPAP-01');
+    assert.equal(kirim[0].data.ruangan_peminjam, 'IGD');
+
+    kirim[0].success({ message: 'ok' });
+    assert.equal(f.ambil('#kodepinjam').nilai, '');
+    assert.ok(f.panggilan.includes('reload-belum'));
+});
+
+test('Simpan ditolak karena alat baru dipinjam: alat itu dilepas, alat lain tetap tercentang', () => {
+    const f = form();
+    const kirim = [];
+    const cek = [];
+    f.ctx.$.ajax = options => kirim.push(options);
+    f.ctx.$.get = (url, params, sukses) => { cek.push({ url, params, sukses }); return { fail() { return this; } }; };
+    f.ctx.nilai = () => ({ cssd_keluar_log_ids: Object.keys(f.ctx.itemdipilih) });
+    f.ambil('#namasectionpengguna').nilai = 'SANDAT';
+    f.ctx.itemdipilih = { 1: { kode_unik: 'SDT-1' }, 2: { kode_unik: 'SDT-2' }, 3: { kode_unik: 'SDT-3' } };
+
+    f.ctx.simpan();
+    kirim[0].error({ status: 422, responseJSON: { message: 'Item SDT-1 sedang dipinjam CEMPAKA. Penilaian dilakukan oleh unit peminjam.' } });
+
+    assert.equal(cek[0].url, '/operasional/keluar-data');
+    assert.deepEqual(Array.from(cek[0].params.cssd_keluar_log_ids), ['1', '2', '3']);
+    // SDT-1 kini dipinjam CEMPAKA, SDT-3 sudah dinilai perawat lain (tidak kembali), SDT-2 masih bisa.
+    cek[0].sukses([
+        { cssd_keluar_log_id: 1, kode_unik: 'SDT-1', nama_section_pengguna: 'SANDAT', ruangan_peminjam: 'CEMPAKA' },
+        { cssd_keluar_log_id: 2, kode_unik: 'SDT-2', nama_section_pengguna: 'SANDAT', ruangan_peminjam: null },
+    ]);
+
+    assert.deepEqual(Object.keys(f.ctx.itemdipilih), ['2']);
+    assert.equal(f.ambil('#jumlahdipilih').teks, '1 item');
+    assert.ok(f.panggilan.includes('reload-belum'));
+});
+
+test('Error selain 422 tidak mengubah alat yang dicentang', () => {
+    const f = form();
+    const kirim = [];
+    let dicek = false;
+    f.ctx.$.ajax = options => kirim.push(options);
+    f.ctx.$.get = () => { dicek = true; return { fail() { return this; } }; };
+    f.ctx.nilai = () => ({});
+    f.ctx.itemdipilih = { 1: {} };
+
+    f.ctx.simpan();
+    kirim[0].error({ status: 500, responseJSON: { message: 'Server error' } });
+    assert.equal(dicek, false);
+    assert.deepEqual(Object.keys(f.ctx.itemdipilih), ['1']);
+});
+
 test('Batal revisi mengembalikan form ke input biasa', () => {
     const f = form();
     f.ctx.mulairevisi(data);

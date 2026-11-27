@@ -295,7 +295,9 @@
                 $("#sudahmaxreuse").val('0');
                 $("#punyariwayatkeluar").val(parseInt(item.jumlah_keluar) > 0 ? '1' : '0');
                 $("#prosesawal").val('0');
-                $("#infoalat").html(`<b>${item.kode_unik}</b> - ${item.nama_bmhp}<br>Reuse sekarang: ${item.reuse_ke}/${item.max_reuse}<br>Status: ${item.status}<br>Ruangan: ${item.last_unit ?? '-'}`);
+                var peminjam = item.keluar_terakhir && item.keluar_terakhir.ruangan_peminjam;
+                $("#infoalat").html(`<b>${item.kode_unik}</b> - ${item.nama_bmhp}<br>Reuse sekarang: ${item.reuse_ke}/${item.max_reuse}<br>Status: ${item.status}<br>Ruangan: ${item.last_unit ?? '-'}` +
+                    (peminjam ? `<br><span class="text-sky-700">Dipinjam dan dibawa oleh ${tampil(peminjam)}. Setelah diterima, alat tetap milik ${tampil(item.last_unit)}.</span>` : ''));
 
                 isikeluarterakhir(item);
             }).fail(function(xhr, status) {
@@ -423,7 +425,9 @@
                     } },
                     { data: 'kode_unik', render: function(data) { return tampil(data); } },
                     { data: 'nama_bmhp', render: function(data) { return tampil(data); } },
-                    { data: 'nama_section_pengguna', render: function(data) { return tampil(data); } },
+                    { data: 'nama_section_pengguna', render: function(data, type, row) {
+                        return tampil(data) + (row.ruangan_peminjam ? '<div class="text-xs font-medium text-sky-700">Dipinjam ' + tampil(row.ruangan_peminjam) + '</div>' : '');
+                    } },
                     { data: 'nama_ruangan_pasien', render: function(data, type, row) { return tampil(data || row.nama_section_pengguna); } },
                     { data: 'no_rm', render: function(data) { return tampil(data); } },
                     { data: 'nama_pasien', render: function(data) { return tampil(data); } },

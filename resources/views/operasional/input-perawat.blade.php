@@ -126,6 +126,21 @@
             <div class="border-t border-slate-200 px-6 py-4">
                 <h2 class="text-sm font-bold text-slate-800">Barang Sudah Dipakai / Belum Masuk CSSD</h2>
             </div>
+            <div class="mx-6 mb-4 rounded border border-sky-200 bg-sky-50 p-4">
+                <label for="kodepinjam" class="block text-sm font-medium text-slate-700">Pinjam alat dari unit lain</label>
+                <p class="mb-2 mt-1 text-xs text-slate-600">
+                    Scan atau ketik kode unik alat milik unit lain, lalu klik <b>Pinjam</b>. Alat akan muncul di daftar di bawah untuk dinilai.
+                    Setelah kembali dari CSSD, alat tetap milik unit asalnya.
+                </p>
+                <div id="formpinjam" class="flex max-w-md gap-2">
+                    <input type="text" id="kodepinjam" autocomplete="off" placeholder="Kode unik alat"
+                        onkeydown="if (event.key === 'Enter') { event.preventDefault(); pinjamalat(); }"
+                        @disabled(auth()->user()->dibatasiRuangan() && !auth()->user()->punyaRuangan())
+                        class="block w-full rounded-lg border border-slate-300 bg-white p-2 text-xs disabled:opacity-50">
+                    <button type="button" onclick="pinjamalat()" @disabled(auth()->user()->dibatasiRuangan() && !auth()->user()->punyaRuangan())
+                        class="rounded bg-sky-600 px-4 py-2 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">Pinjam</button>
+                </div>
+            </div>
             <div class="px-6 pb-6">
                 <div class="overflow-x-auto">
                     <table id="tbperawatkeluar" class="display cell-border compact w-full text-sm">
@@ -214,6 +229,10 @@
 
             $("#tbrevisi").on('click', '.tombolbatalpenilaian', function() {
                 batalpenilaian(tabelrevisi.row($(this).closest('tr')).data());
+            });
+
+            $("#tbperawatkeluar").on('click', '.tombolkembalikan', function() {
+                kembalikanpinjaman(tabelperawatkeluar.row($(this).closest('tr')).data());
             });
 
             $("#tbperawatkeluar").on('change', '.pilihitem', function() {
@@ -344,7 +363,8 @@
 
             $("#tanggalpenggunaan").val(data.tanggal_penggunaan || '');
             $("#jampenggunaan").val(String(data.jam_penggunaan || '').slice(0, 5));
-            if (!$("#namasectionpengguna").prop('readonly')) $("#namasectionpengguna").val(data.nama_section_pengguna || '');
+            // Alat pinjaman dinilai atas nama unit peminjam.
+            if (!$("#namasectionpengguna").prop('readonly')) $("#namasectionpengguna").val(data.ruangan_peminjam || data.nama_section_pengguna || '');
             $("#namaperawat").val(data.nama_perawat || '');
             $("#hasiluji").val(data.hasil_uji_perawat);
             $("#catatan").val(data.catatan_uji_perawat || '');
@@ -367,6 +387,58 @@
 
         function batalrevisi() {
             kosong();
+        }
+
+        // 'pinjaman' = dipinjam ruangan aktif dari unit lain, 'dipinjamkan' = milik ruangan aktif yang dipinjam unit lain.
+        function statuspinjaman(data) {
+            if (!data.ruangan_peminjam) return '';
+
+            var ruanganaktif = $("#namasectionpengguna").val().trim().toLowerCase();
+            return String(data.ruangan_peminjam).trim().toLowerCase() === ruanganaktif ? 'pinjaman' : 'dipinjamkan';
+        }
+
+        function pinjamalat() {
+            var kode = $("#kodepinjam").val().trim();
+            $(".error-message").remove();
+
+            if (kode === '') {
+                $("#formpinjam").after('<span class="error-message mt-1 block text-xs text-red-500">Scan atau ketik kode unik alat</span>');
+                return;
+            }
+
+            $.ajax({
+                url: '/input-perawat/pinjam',
+                type: 'POST',
+                data: { _token: "{{ csrf_token() }}", kode_unik: kode, ruangan_peminjam: $("#namasectionpengguna").val().trim() },
+                success: function(response) {
+                    alert(response.message);
+                    $("#kodepinjam").val('');
+                    tabelperawatkeluar.ajax.reload(null, false);
+                },
+                error: function(xhr) { alert('Peminjaman gagal: ' + pesanerror(xhr)); }
+            });
+        }
+
+        // Alat pinjaman yang tidak jadi dipakai dikembalikan ke unit pemiliknya.
+        function kembalikanpinjaman(data) {
+            if (!confirm('Kembalikan ' + data.kode_unik + ' - ' + data.nama_bmhp + ' ke ' + data.nama_section_pengguna + '?\n\n' +
+                'Pilih ini jika alat tidak jadi dipakai.')) {
+                return;
+            }
+
+            $.ajax({
+                url: '/input-perawat/kembalikan-pinjaman',
+                type: 'POST',
+                data: { _token: "{{ csrf_token() }}", cssd_keluar_log_id: data.cssd_keluar_log_id },
+                success: function(response) {
+                    alert(response.message);
+                    delete itemdipilih[data.cssd_keluar_log_id];
+                    hitungdipilih();
+                    updateapprovaloverreuse();
+                    tabelperawatkeluar.ajax.reload(null, false);
+                },
+                error: function(xhr) { alert('Terjadi kesalahan: ' + pesanerror(xhr)); }
+            });
         }
 
         // Batal penilaian (mis. salah pilih alat): alat kembali ke daftar "Barang Sudah Dipakai / Belum Masuk CSSD".
@@ -445,14 +517,27 @@
                         orderable: false,
                         searchable: false,
                         render: function(data) {
+                            // Alat ruangan ini yang sedang dipinjam unit lain hanya ditampilkan, penilaiannya oleh peminjam.
+                            if (statuspinjaman(data) === 'dipinjamkan') {
+                                return '<span class="text-xs font-medium text-sky-700">Dipinjam ' + tampil(data.ruangan_peminjam) + '</span>';
+                            }
+
                             var checked = itemdipilih[data.cssd_keluar_log_id] ? 'checked' : '';
-                            return `<input type="checkbox" class="pilihitem" value="${data.cssd_keluar_log_id}" ${checked}>`;
+                            var tombol = statuspinjaman(data) === 'pinjaman'
+                                ? '<button type="button" class="tombolkembalikan mt-1 block text-xs font-medium text-sky-700 underline hover:text-sky-900">Kembalikan</button>'
+                                : '';
+                            return `<input type="checkbox" class="pilihitem" value="${data.cssd_keluar_log_id}" ${checked}>` + tombol;
                         }
                     },
                     { data: null, render: function(data) { return tampil((data.tanggal_keluar || '-') + ' ' + (data.jam_keluar || '')); } },
                     { data: 'kode_unik', render: function(data) { return tampil(data); } },
                     { data: 'nama_bmhp', render: function(data) { return tampil(data); } },
-                    { data: 'nama_section_pengguna', render: function(data) { return tampil(data); } },
+                    { data: null, render: function(data) {
+                        var ruangan = tampil(data.nama_section_pengguna);
+                        return data.ruangan_peminjam
+                            ? ruangan + '<div class="text-xs font-medium text-sky-700">Dipinjam ' + tampil(data.ruangan_peminjam) + '</div>'
+                            : ruangan;
+                    } },
                     { data: 'perawat_penerima', render: function(data) { return tampil(data); } },
                     { data: null, render: function(data) {
                         var reuse = parseInt(data.reuse_ke_keluar || data.reuse_ke || 0);
@@ -486,7 +571,11 @@
                 language: bahasaDatatable(),
                 columns: [
                     { data: null, render: function(data) { return tampil((data.tanggal_penggunaan || '-') + ' ' + String(data.jam_penggunaan || '').slice(0, 5)); } },
-                    { data: 'kode_unik', render: function(data) { return tampil(data); } },
+                    { data: 'kode_unik', render: function(data, type, row) {
+                        return tampil(data) + (row.ruangan_peminjam
+                            ? '<div class="text-xs font-medium text-sky-700">Pinjaman dari ' + tampil(row.nama_section_pengguna) + '</div>'
+                            : '');
+                    } },
                     { data: 'nama_bmhp', render: function(data) { return tampil(data); } },
                     { data: null, render: function(data) { return tampil((data.no_rm || '-') + ' - ' + (data.nama_pasien || '-')); } },
                     { data: 'hasil_uji_perawat', render: function(data) {
@@ -543,7 +632,46 @@
                     alert(revisi ? 'Revisi penilaian berhasil disimpan.' : 'Input perawat berhasil disimpan. Jumlah item: ' + response.jumlah);
                     kosong();
                 },
-                error: function(xhr) { alert('Terjadi kesalahan: ' + pesanerror(xhr)); }
+                error: function(xhr) {
+                    alert('Terjadi kesalahan: ' + pesanerror(xhr));
+                    if (xhr.status !== 422) return;
+
+                    if (revisi) {
+                        tabelrevisi.ajax.reload(null, false);
+                    } else {
+                        segarkanpilihan();
+                    }
+                }
+            });
+        }
+
+        // Daftar di halaman bisa sudah basi (mis. alat baru saja dipinjam unit lain atau dinilai perawat lain):
+        // cek ulang alat yang dicentang ke server dan lepas yang tidak bisa dinilai lagi.
+        function segarkanpilihan() {
+            var ids = Object.keys(itemdipilih);
+
+            if (ids.length === 0) {
+                tabelperawatkeluar.ajax.reload(null, false);
+                return;
+            }
+
+            $.get('/operasional/keluar-data', { belum_uji: 1, cssd_keluar_log_ids: ids }, function(rows) {
+                var masihbisa = {};
+                (rows || []).forEach(function(row) {
+                    if (statuspinjaman(row) !== 'dipinjamkan') masihbisa[row.cssd_keluar_log_id] = row;
+                });
+
+                ids.forEach(function(id) {
+                    if (masihbisa[id]) {
+                        itemdipilih[id] = masihbisa[id];
+                    } else {
+                        delete itemdipilih[id];
+                    }
+                });
+
+                hitungdipilih();
+                updateapprovaloverreuse();
+                tabelperawatkeluar.ajax.reload(null, false);
             });
         }
 

@@ -46,6 +46,7 @@ trait CssdSchema
             '2026_08_10_000013_add_over_reuse_approval_to_cssd_keluar_logs_table.php',
             '2026_09_22_000014_add_ruangan_to_users_table.php',
             '2026_10_20_000015_add_ruangan_pasien_to_reuse.php',
+            '2026_11_26_000016_add_peminjaman_to_cssd_keluar_logs.php',
         ] as $migration) {
             $this->migrasi($migration);
         }
